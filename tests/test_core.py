@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+
+from image_pipeline.color import cmyk_percent_to_u8, replace_background
+from image_pipeline.config import DEFAULT_CONFIG
+from image_pipeline.io_utils import NameAllocator
+from image_pipeline.models import OrientationEstimate, ProtectedSubject, RotationResult
+
+try:
+    import cv2
+except ImportError:  # Les tests géométriques seront actifs après installation.
+    cv2 = None
+
+
+class ColorAndNamingTests(unittest.TestCase):
+    def test_requested_cmyk_bytes_are_exact(self) -> None:
+        self.assertEqual(cmyk_percent_to_u8((84, 82, 73, 95)), (214, 209, 186, 242))
+
+    def test_background_pixels_are_exact_in_memory(self) -> None:
+        rgb = np.full((9, 9, 3), (180, 80, 40), dtype=np.uint8)
+        alpha = np.zeros((9, 9), dtype=np.uint8)
+        alpha[3:6, 3:6] = 255
+        rotated = RotationResult(
+            rgb=rgb,
+            expected_original_rgb=rgb.copy(),
+            alpha=alpha,
+            protected_core=(alpha == 255).astype(np.uint8),
+            affine_matrix=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+            orientation_before=OrientationEstimate(determinable=True),
+            alpha_mass_before=9.0,
+            perimeter_before=8.0,
+            aspect_ratio_before=1.0,
+            old_background_rgb=(255, 255, 255),
+        )
+        result = replace_background(rotated, DEFAULT_CONFIG)
+        output = np.asarray(result.image)
+        expected = np.asarray((214, 209, 186, 242), dtype=np.uint8)
+        self.assertEqual(result.image.mode, "CMYK")
+        self.assertTrue(np.all(output[alpha == 0] == expected))
+
+    def test_naming_continues_after_existing_indices(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "document_A_1.tif").write_bytes(b"existing")
+            (root / "document_A_3.jpg").write_bytes(b"existing")
+            allocator = NameAllocator(root, ".tif")
+            path, index = allocator.reserve("document_A")
+            self.assertEqual(index, 4)
+            self.assertEqual(path.name, "document_A_4.tif")
+            NameAllocator.release(path)
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class GeometryTests(unittest.TestCase):
+    def test_rotation_is_rigid_and_reduces_skew(self) -> None:
+        from image_pipeline.geometry import (
+            detect_subject_inclination,
+            straighten_subject_without_clipping,
+        )
+
+        config = replace(
+            DEFAULT_CONFIG,
+            final_padding_px=12,
+            min_rotation_deg=0.0,
+        )
+        alpha = np.zeros((180, 180), dtype=np.uint8)
+        rectangle = ((90.0, 90.0), (34.0, 112.0), 13.0)
+        box = cv2.boxPoints(rectangle).astype(np.int32)
+        cv2.fillConvexPoly(alpha, box, 255)
+        rgb = np.full((180, 180, 3), (90, 130, 170), dtype=np.uint8)
+        subject = ProtectedSubject(
+            original_rgb=rgb.copy(),
+            protected_rgb=rgb.copy(),
+            alpha=alpha,
+            protected_core=(alpha == 255).astype(np.uint8),
+            old_background_rgb=(240, 240, 240),
+        )
+        before = detect_subject_inclination(alpha, config)
+        self.assertTrue(before.determinable)
+        result = straighten_subject_without_clipping(subject, before, config)
+        after = detect_subject_inclination(result.alpha, config)
+        self.assertTrue(after.determinable)
+        self.assertLess(abs(after.correction_deg), 1.0)
+        singular_values = np.linalg.svd(result.affine_matrix[:, :2], compute_uv=False)
+        self.assertTrue(np.allclose(singular_values, (1.0, 1.0), atol=1e-8))
+        self.assertGreaterEqual(np.min(np.nonzero(result.alpha)[0]), 4)
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class SegmentationStructureTests(unittest.TestCase):
+    def test_existing_alpha_is_trusted_without_calling_ai(self) -> None:
+        from image_pipeline.models import FrameData
+        from image_pipeline.segmentation import generate_precise_cutout
+
+        class EngineThatMustNotRun:
+            def remove_background(self, *_args, **_kwargs):
+                raise AssertionError("L'IA ne doit pas remplacer un alpha existant")
+
+        rgb = np.full((40, 50, 3), (120, 70, 30), dtype=np.uint8)
+        alpha = np.zeros((40, 50), dtype=np.uint8)
+        alpha[8:33, 11:39] = 255
+        frame = FrameData(Path("alpha.png"), 1, rgb, alpha)
+        result = generate_precise_cutout(frame, EngineThatMustNotRun(), DEFAULT_CONFIG)
+        self.assertTrue(np.array_equal(result.alpha, alpha))
+        self.assertTrue(np.array_equal(result.edge_rgb, rgb))
+
+    def test_two_disjoint_subjects_are_extracted_in_reading_order(self) -> None:
+        from image_pipeline.segmentation import detect_subject_regions
+
+        alpha = np.zeros((160, 240), dtype=np.uint8)
+        alpha[20:90, 25:75] = 255
+        alpha[55:140, 150:220] = 255
+        config = replace(
+            DEFAULT_CONFIG,
+            split_subjects=True,
+            component_grouping_gap_px=4,
+            min_subject_area_ratio=0.001,
+            crop_padding_px=5,
+        )
+        regions = detect_subject_regions(alpha, config)
+        self.assertEqual(len(regions), 2)
+        self.assertLess(regions[0].bbox_xyxy[0], regions[1].bbox_xyxy[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,2 @@
+# Aucun composant GPU n'est nécessaire dans cette version.
+-r requirements.txt

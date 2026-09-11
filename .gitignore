@@ -1,0 +1,27 @@
+# Sauvegardes locales
+sauvegarde_*/
+
+# Images sources et résultats
+*.tif
+*.tiff
+JPEG_recadres/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environnements Python
+.venv/
+venv/
+env/
+
+# Fichiers système / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs et temporaires
+*.log
+*.tmp
