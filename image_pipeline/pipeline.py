@@ -21,6 +21,7 @@ from .io_utils import (
     save_to_temporary_file,
     setup_logging,
 )
+from .manual_review import record_error, record_output, record_source_start
 from .models import FrameData, ProcessSummary, SegmentationResult, SubjectRegion
 from .quality import run_quality_control
 from .segmentation import (
@@ -123,6 +124,19 @@ def process_one_subject(
         temporary = None
 
         try:
+            record_output(
+                config,
+                frame.source_path,
+                target,
+                frame_index=frame.frame_index,
+                subject_index=region.detection_order,
+                qc_passed=report.passed,
+                qc_problems=list(report.problems),
+            )
+        except (OSError, ValueError) as exc:
+            logger.error("Impossible d'écrire le manifeste manuel pour %s : %s", target, exc)
+
+        try:
             append_journal(
                 config,
                 {
@@ -192,6 +206,20 @@ def process_one_frame(
                 frame_index=frame.frame_index,
                 subject_index=region.detection_order,
             )
+            try:
+                record_error(
+                    config,
+                    frame.source_path,
+                    exc,
+                    frame_index=frame.frame_index,
+                    subject_index=region.detection_order,
+                )
+            except (OSError, ValueError) as manifest_exc:
+                logger.error(
+                    "Impossible d'écrire le manifeste manuel pour %s : %s",
+                    frame.source_path,
+                    manifest_exc,
+                )
     return results, errors
 
 
@@ -203,6 +231,11 @@ def process_source_file(
     summary: ProcessSummary,
 ) -> None:
     """Extrait et traite toutes les trames d'un fichier source."""
+
+    try:
+        record_source_start(config, source)
+    except (OSError, ValueError) as exc:
+        logger.error("Impossible d'initialiser le manifeste manuel pour %s : %s", source, exc)
 
     frames = iter(extract_images_from_source(source, config))
 
@@ -249,6 +282,19 @@ def process_source_file(
                 exc,
                 frame_index=frame.frame_index,
             )
+            try:
+                record_error(
+                    config,
+                    source,
+                    exc,
+                    frame_index=frame.frame_index,
+                )
+            except (OSError, ValueError) as manifest_exc:
+                logger.error(
+                    "Impossible d'écrire le manifeste manuel pour %s : %s",
+                    source,
+                    manifest_exc,
+                )
 
     process_frame(first_frame)
 
@@ -257,6 +303,7 @@ def process_source_file(
 
     for frame in frames:
         process_frame(frame)
+
 
 def _output_dir_for_source(source: Path, config: PipelineConfig) -> Path:
     """Détermine le dossier de sortie correspondant au dossier source."""
@@ -272,6 +319,7 @@ def _output_dir_for_source(source: Path, config: PipelineConfig) -> Path:
     # Le premier sous-dossier de input représente le lot.
     lot_name = relative.parts[0]
     return config.output_dir / f"{lot_name}-ps"
+
 
 def process_batch(config: PipelineConfig) -> ProcessSummary:
     """Fonction principale : découvre, traite, contrôle et journalise le lot."""
@@ -302,6 +350,7 @@ def process_batch(config: PipelineConfig) -> ProcessSummary:
 
     for source_index, source in enumerate(sources, start=1):
         logger.info("[%d/%d] %s", source_index, len(sources), source)
+        source_config = config
         try:
             source_output_dir = _output_dir_for_source(source, config)
             source_config = replace(config, output_dir=source_output_dir)
@@ -325,7 +374,15 @@ def process_batch(config: PipelineConfig) -> ProcessSummary:
         except Exception as exc:
             summary.processing_errors += 1
             logger.exception("Échec du fichier %s : %s", source, exc)
-            _journal_error(config, source, exc)
+            _journal_error(source_config, source, exc)
+            try:
+                record_error(source_config, source, exc)
+            except (OSError, ValueError) as manifest_exc:
+                logger.error(
+                    "Impossible d'écrire le manifeste manuel pour %s : %s",
+                    source,
+                    manifest_exc,
+                )
 
     append_journal(
         config,

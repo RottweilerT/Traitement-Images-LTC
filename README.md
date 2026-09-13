@@ -1,4 +1,4 @@
-# Traitement d’images — version 1.5.0, couleurs du sujet protégées
+# Traitement d’images — version 1.6.0, contrôle manuel et couleurs protégées
 
 ## Correctif colorimétrique 1.5.0
 
@@ -94,21 +94,30 @@ Vérification de la version :
 python run_pipeline.py --version
 ```
 
-La réponse attendue est `1.5.0`.
+La réponse attendue est `1.6.0`.
 
-## Nommage et séparation
+## Nommage, lots et séparation
 
-Chaque élément détecté produit un fichier indépendant. Pour une source nommée
-`document_A.tif`, les sorties sont :
+Plusieurs dossiers peuvent être déposés dans `input` lors d'un même lancement.
+Chaque dossier de premier niveau produit un dossier portant le même nom suivi de
+`-ps` dans `output`. Par exemple :
 
 ```text
-document_A_1.tif
-document_A_2.tif
-document_A_3.tif
+input/Lot_001/001.tif  ->  output/Lot_001-ps/001.tif
+input/Lot_002/010.tif  ->  output/Lot_002-ps/010.tif
 ```
 
-Si certains numéros existent déjà, le programme continue après le plus grand
-numéro afin de ne rien écraser.
+Une source qui ne produit qu'une seule image conserve son nom. Si une source
+produit plusieurs images indépendantes, les sorties sont numérotées avec un
+tiret :
+
+```text
+document_A-1.tif
+document_A-2.tif
+document_A-3.tif
+```
+
+Le programme n'écrase jamais silencieusement une sortie existante.
 
 ## Bordure foncée de 2 mm
 
@@ -143,6 +152,41 @@ Exemple avec des dossiers personnalisés :
 ```bat
 python run_pipeline.py "C:\MesTIFF" -o "C:\MesResultats" --margin-mm 2
 ```
+
+
+## Contrôle manuel après traitement
+
+Le traitement crée dans chaque dossier `*-ps` un manifeste technique
+`controle_manuel_manifest.json`. Ce manifeste mémorise la source de chaque
+sortie, les sorties effectivement produites, les contrôles qualité et les
+éventuels refus/erreurs.
+
+Après avoir contrôlé visuellement les résultats, il est possible de supprimer
+les sorties jugées insatisfaisantes puis de lancer :
+
+```bat
+python run_pipeline.py --bilan-manuel
+```
+
+Le programme compare alors les sorties présentes au manifeste et crée, si
+nécessaire :
+
+```text
+output/Lot_001-ps/
+├── A_TRAITER_MANUELLEMENT/
+└── CONTROLE_MANUEL.txt
+```
+
+Pour chaque sortie supprimée, `A_TRAITER_MANUELLEMENT` reçoit une copie binaire
+intégrale du TIFF source. Si deux sorties provenant du même TIFF ont été
+supprimées, deux copies du TIFF original sont préparées, avec les noms des
+sorties supprimées. Les échecs/refus automatiques sont également préparés pour
+reprise manuelle et leur raison est inscrite dans `CONTROLE_MANUEL.txt`.
+
+Les fichiers du dossier `input` ne sont jamais déplacés, renommés, écrasés ou
+modifiés par cette fonction. Une copie déjà présente dans
+`A_TRAITER_MANUELLEMENT` n'est jamais écrasée, afin de protéger un éventuel
+travail manuel déjà commencé.
 
 ## Journaux et erreurs
 

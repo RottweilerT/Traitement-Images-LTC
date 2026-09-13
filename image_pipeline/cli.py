@@ -79,6 +79,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="afficher la configuration effective puis quitter",
     )
+    parser.add_argument(
+        "--bilan-manuel",
+        action="store_true",
+        help=(
+            "détecter les sorties supprimées/refusées et préparer les copies "
+            "des originaux dans A_TRAITER_MANUELLEMENT"
+        ),
+    )
     parser.add_argument("--version", action="version", version=__version__)
     return parser
 
@@ -106,8 +114,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.print_config:
             print(json.dumps(config.serializable(), indent=2, ensure_ascii=False))
             return 0
-        # Import tardif : --help et --print-config restent disponibles même si
-        # les lourdes dépendances image ne sont pas encore installées.
+        if args.bilan_manuel:
+            from .manual_review import run_manual_review
+
+            review = run_manual_review(config)
+            print(
+                "Bilan manuel : "
+                f"{review['manifests_found']} manifeste(s), "
+                f"{review['missing_outputs']} sortie(s) supprimée(s), "
+                f"{review['automatic_failures']} échec(s)/refus automatique(s), "
+                f"{review['qc_to_review']} sortie(s) QC à vérifier, "
+                f"{review['copies_created']} copie(s) préparée(s)."
+            )
+            return 0 if review["manifests_found"] else 3
+        # Import tardif : --help, --print-config et --bilan-manuel restent disponibles
+        # sans lancer le moteur de traitement d'image.
         from .pipeline import process_batch
 
         summary = process_batch(config)

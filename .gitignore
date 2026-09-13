@@ -5,6 +5,7 @@ sauvegarde_*/
 *.tif
 *.tiff
 JPEG_recadres/
+output/
 
 # Python
 __pycache__/
