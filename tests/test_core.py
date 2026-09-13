@@ -11,6 +11,7 @@ from image_pipeline.color import cmyk_percent_to_u8, replace_background
 from image_pipeline.config import DEFAULT_CONFIG
 from image_pipeline.io_utils import NameAllocator
 from image_pipeline.models import OrientationEstimate, ProtectedSubject, RotationResult
+from image_pipeline.pipeline import _output_dir_for_source
 
 try:
     import cv2
@@ -44,17 +45,50 @@ class ColorAndNamingTests(unittest.TestCase):
         self.assertEqual(result.image.mode, "CMYK")
         self.assertTrue(np.all(output[alpha == 0] == expected))
 
-    def test_naming_continues_after_existing_indices(self) -> None:
+    def test_single_output_keeps_source_name(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "document_A_1.tif").write_bytes(b"existing")
-            (root / "document_A_3.jpg").write_bytes(b"existing")
             allocator = NameAllocator(root, ".tif")
-            path, index = allocator.reserve("document_A")
-            self.assertEqual(index, 4)
-            self.assertEqual(path.name, "document_A_4.tif")
+
+            path, index = allocator.reserve(
+                "document_A",
+                numbered=False,
+            )
+
+            self.assertIsNone(index)
+            self.assertEqual(path.name, "document_A.tif")
             NameAllocator.release(path)
 
+    def test_numbered_outputs_use_hyphen_and_continue(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "document_A-1.tif").write_bytes(b"existing")
+            (root / "document_A-3.jpg").write_bytes(b"existing")
+            allocator = NameAllocator(root, ".tif")
+
+            path, index = allocator.reserve(
+                "document_A",
+                numbered=True,
+            )
+
+            self.assertEqual(index, 4)
+            self.assertEqual(path.name, "document_A-4.tif")
+            NameAllocator.release(path)
+
+    def test_single_output_is_never_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "document_A.tif"
+            existing.write_bytes(b"original")
+            allocator = NameAllocator(root, ".tif")
+
+            with self.assertRaises(FileExistsError):
+                allocator.reserve(
+                    "document_A",
+                    numbered=False,
+                )
+
+            self.assertEqual(existing.read_bytes(), b"original")
 
 @unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
 class GeometryTests(unittest.TestCase):
@@ -91,6 +125,44 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(np.allclose(singular_values, (1.0, 1.0), atol=1e-8))
         self.assertGreaterEqual(np.min(np.nonzero(result.alpha)[0]), 4)
 
+class OutputRoutingTests(unittest.TestCase):
+    def test_top_level_folder_gets_ps_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            source = input_dir / "Lot_001" / "001.tif"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"test")
+
+            config = replace(
+                DEFAULT_CONFIG,
+                input_dir=input_dir,
+                output_dir=output_dir,
+            )
+
+            result = _output_dir_for_source(source, config)
+
+            self.assertEqual(result, output_dir / "Lot_001-ps")
+
+    def test_file_directly_in_input_keeps_root_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            source = input_dir / "001.tif"
+            input_dir.mkdir(parents=True)
+            source.write_bytes(b"test")
+
+            config = replace(
+                DEFAULT_CONFIG,
+                input_dir=input_dir,
+                output_dir=output_dir,
+            )
+
+            result = _output_dir_for_source(source, config)
+
+            self.assertEqual(result, output_dir)
 
 @unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
 class SegmentationStructureTests(unittest.TestCase):

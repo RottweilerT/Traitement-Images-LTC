@@ -168,11 +168,13 @@ def extract_images_from_source(
 
 
 class NameAllocator:
-    """Alloue sans écrasement des noms ``base_N.ext``.
+    """Alloue sans écrasement les noms de fichiers de sortie.
 
-    Un fichier vide est créé en mode exclusif pour réserver chaque nom. Il est
-    ensuite remplacé par le fichier temporaire validé. Cette stratégie évite
-    les collisions même si deux processus écrivent dans le même dossier.
+    Une sortie unique conserve le nom du fichier source.
+    Plusieurs sorties issues du même fichier utilisent ``base-1.ext``,
+    ``base-2.ext``, etc.
+
+    Un fichier vide est créé en mode exclusif pour réserver chaque nom.
     """
 
     def __init__(self, output_dir: Path, extension: str) -> None:
@@ -182,7 +184,7 @@ class NameAllocator:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     def _initial_index(self, source_stem: str) -> int:
-        pattern = re.compile(rf"^{re.escape(source_stem)}_(\d+)(?:\.[^.]+)?$")
+        pattern = re.compile(rf"^{re.escape(source_stem)}-(\d+)(?:\.[^.]+)?$")
         greatest = 0
         for path in self.output_dir.iterdir():
             if not path.is_file():
@@ -192,12 +194,29 @@ class NameAllocator:
                 greatest = max(greatest, int(match.group(1)))
         return greatest + 1
 
-    def reserve(self, source_stem: str) -> tuple[Path, int]:
+    def reserve(
+        self,
+        source_stem: str,
+        *,
+        numbered: bool,
+    ) -> tuple[Path, int | None]:
+        if not numbered:
+            candidate = self.output_dir / f"{source_stem}{self.extension}"
+            try:
+                with candidate.open("xb"):
+                    pass
+                return candidate, None
+            except FileExistsError as exc:
+                raise FileExistsError(
+                    f"Le fichier de sortie existe déjà : {candidate}"
+                ) from exc
+
         if source_stem not in self._next_by_stem:
             self._next_by_stem[source_stem] = self._initial_index(source_stem)
+
         index = self._next_by_stem[source_stem]
         while True:
-            candidate = self.output_dir / f"{source_stem}_{index}{self.extension}"
+            candidate = self.output_dir / f"{source_stem}-{index}{self.extension}"
             try:
                 with candidate.open("xb"):
                     pass

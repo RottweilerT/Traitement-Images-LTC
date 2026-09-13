@@ -19,7 +19,7 @@ class PipelineConfig:
     # Entrées / sorties
     input_dir: Path = Path("input")
     output_dir: Path = Path("output")
-    recursive: bool = False
+    recursive: bool = True
     supported_extensions: tuple[str, ...] = (
         ".jpg",
         ".jpeg",

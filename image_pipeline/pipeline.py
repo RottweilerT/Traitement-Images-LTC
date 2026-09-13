@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from .color import replace_background
@@ -61,7 +62,9 @@ def process_one_subject(
     allocator: NameAllocator,
     config: PipelineConfig,
     logger: logging.Logger,
+    numbered: bool,
 ) -> tuple[Path, bool]:
+
     """Traite, contrôle et sauvegarde un sujet ; renvoie (chemin, QC_OK)."""
 
     protected = protect_subject_interior(segmentation, region, config)
@@ -98,7 +101,10 @@ def process_one_subject(
     )
     composite = replace_background(rotated, config)
 
-    target, sequence_number = allocator.reserve(frame.source_path.stem)
+    target, sequence_number = allocator.reserve(
+        frame.source_path.stem,
+        numbered=numbered,
+    )
     temporary: Path | None = None
     try:
         temporary = save_to_temporary_file(composite, target, frame, config)
@@ -145,12 +151,14 @@ def process_one_frame(
     allocator: NameAllocator,
     config: PipelineConfig,
     logger: logging.Logger,
+    numbered: bool,
 ) -> tuple[list[tuple[Path, bool]], int]:
     """Segmente une trame puis traite ses sujets dans l'ordre de détection."""
 
     logger.info("  Trame %d : détection déterministe du fond…", frame.frame_index)
     segmentation = generate_precise_cutout(frame, logger, config)
     regions = detect_subject_regions(segmentation.alpha, config)
+    numbered = numbered or len(regions) > 1
     logger.info("  Trame %d : %d sujet(s) à produire", frame.frame_index, len(regions))
 
     results: list[tuple[Path, bool]] = []
@@ -165,6 +173,7 @@ def process_one_frame(
                     allocator,
                     config,
                     logger,
+                    numbered,
                 )
             )
         except Exception as exc:
@@ -195,15 +204,30 @@ def process_source_file(
 ) -> None:
     """Extrait et traite toutes les trames d'un fichier source."""
 
-    frame_found = False
-    for frame in extract_images_from_source(source, config):
-        frame_found = True
+    frames = iter(extract_images_from_source(source, config))
+
+    try:
+        first_frame = next(frames)
+    except StopIteration:
+        raise RuntimeError("Le fichier ne contient aucune trame exploitable.")
+
+    try:
+        second_frame = next(frames)
+    except StopIteration:
+        second_frame = None
+
+    # Dès qu'une deuxième trame existe, toutes les sorties du fichier
+    # doivent être numérotées : base-1.ext, base-2.ext, etc.
+    numbered = second_frame is not None
+
+    def process_frame(frame: FrameData) -> None:
         try:
             results, subject_errors = process_one_frame(
                 frame,
                 allocator,
                 config,
                 logger,
+                numbered,
             )
             summary.frames_processed += 1
             summary.processing_errors += subject_errors
@@ -225,9 +249,29 @@ def process_source_file(
                 exc,
                 frame_index=frame.frame_index,
             )
-    if not frame_found:
-        raise RuntimeError("Le fichier ne contient aucune trame exploitable.")
 
+    process_frame(first_frame)
+
+    if second_frame is not None:
+        process_frame(second_frame)
+
+    for frame in frames:
+        process_frame(frame)
+
+def _output_dir_for_source(source: Path, config: PipelineConfig) -> Path:
+    """Détermine le dossier de sortie correspondant au dossier source."""
+
+    input_dir = config.input_dir.resolve()
+    source = source.resolve()
+    relative = source.relative_to(input_dir)
+
+    # Fichier placé directement dans input : comportement historique.
+    if len(relative.parts) <= 1:
+        return config.output_dir
+
+    # Le premier sous-dossier de input représente le lot.
+    lot_name = relative.parts[0]
+    return config.output_dir / f"{lot_name}-ps"
 
 def process_batch(config: PipelineConfig) -> ProcessSummary:
     """Fonction principale : découvre, traite, contrôle et journalise le lot."""
@@ -247,7 +291,7 @@ def process_batch(config: PipelineConfig) -> ProcessSummary:
             "configuration": config.serializable(),
         },
     )
-    allocator = NameAllocator(config.output_dir, config.output_extension)
+    allocators: dict[Path, NameAllocator] = {}
     logger.info(
         "Démarrage sans IA : %d fichier(s), sortie %s, couleurs du sujet %s, fond %s",
         len(sources),
@@ -259,10 +303,21 @@ def process_batch(config: PipelineConfig) -> ProcessSummary:
     for source_index, source in enumerate(sources, start=1):
         logger.info("[%d/%d] %s", source_index, len(sources), source)
         try:
+            source_output_dir = _output_dir_for_source(source, config)
+            source_config = replace(config, output_dir=source_output_dir)
+
+            allocator = allocators.get(source_output_dir)
+            if allocator is None:
+                allocator = NameAllocator(
+                    source_output_dir,
+                    source_config.output_extension,
+                )
+                allocators[source_output_dir] = allocator
+
             process_source_file(
                 source,
                 allocator,
-                config,
+                source_config,
                 logger,
                 summary,
             )
