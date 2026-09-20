@@ -85,7 +85,7 @@ class PipelineConfig:
     # d'affichage. Par défaut, le sujet reste en RVB sRGB et seul le fond reçoit
     # l'équivalent visuel demandé. #00000c est la couleur de fond de référence.
     preserve_subject_rgb: bool = True
-    rgb_background: tuple[int, int, int] = (0, 0, 12)
+    rgb_background: tuple[int, int, int] = (5, 0, 2)
     output_format: str = "TIFF"  # TIFF recommandé | JPEG | PNG (aperçu RVB)
     output_cmyk_icc_profile: Path | None = None
     tiff_compression: str = "tiff_lzw"
