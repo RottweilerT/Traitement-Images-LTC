@@ -53,7 +53,7 @@ méthode de secours susceptible d’abîmer les dentelures ou les bordures.
 ## Dossiers
 
 ```text
-traitement_images_cmjn/
+Traitement-Images-LTC/
 ├── input/                  fichiers originaux à traiter
 ├── output/                 fichiers générés
 ├── image_pipeline/         modules du programme
@@ -65,10 +65,11 @@ Les originaux placés dans `input` ne sont jamais écrasés.
 
 ## Installation
 
-Depuis l’invite de commandes Windows :
+Dans l'explorateur de fichiers, ouvrir le dossier extrait du zip, puis
+Maj + clic droit dans le dossier → « Ouvrir dans le terminal » (ou « Ouvrir
+la fenêtre PowerShell ici »). Ensuite, exécuter :
 
 ```bat
-cd /d C:\Users\arman\OneDrive\Bureau\traitement_images_cmjn_v2\traitement_images_cmjn
 python -m pip install -r requirements.txt
 ```
 
@@ -78,11 +79,11 @@ GPU n’est nécessaire.
 ## Utilisation normale
 
 1. Copier les TIFF dans le dossier `input`.
-2. Ouvrir l’invite de commandes.
+2. Ouvrir un terminal dans le dossier du projet (Maj + clic droit → « Ouvrir
+   dans le terminal »).
 3. Exécuter :
 
 ```bat
-cd /d C:\Users\arman\OneDrive\Bureau\traitement_images_cmjn_v2\traitement_images_cmjn
 python run_pipeline.py
 ```
 
