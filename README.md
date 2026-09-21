@@ -9,7 +9,7 @@ claire et plus jaune.
 
 Cette conversion globale est supprimée. Le sujet reste désormais en RVB sRGB,
 sans correction de couleur, luminosité, contraste ou saturation. Le fond et la
-marge utilisent le bleu-noir de référence `RVB 0, 0, 12` (`#00000c`). Un profil
+marge utilisent le noir de référence `RVB 5, 0, 2` (`#050002`). Un profil
 sRGB est intégré au TIFF final afin que les logiciels l'affichent de façon
 cohérente.
 
@@ -134,7 +134,7 @@ Le TIFF final est enregistré en RVB sRGB pour conserver strictement les
 couleurs intrinsèques du sujet. La bordure utilise :
 
 ```text
-R = 0   V = 0   B = 12   (#00000c)
+R = 5   V = 0   B = 2   (#050002)
 ```
 
 ## Paramètres principaux
@@ -145,7 +145,7 @@ Ils se trouvent à la fin de `image_pipeline/config.py` :
 - `straighten=True` : active le redressement ;
 - `output_margin_mm=2.0` : largeur de la bordure ;
 - `preserve_subject_rgb=True` : interdit la conversion globale en CMJN ;
-- `rgb_background=(0, 0, 12)` : couleur du fond et de la marge ;
+- `rgb_background=(5, 0, 2)` : couleur du fond et de la marge ;
 - `output_format="TIFF"` : format sans perte recommandé.
 
 Exemple avec des dossiers personnalisés :
