@@ -35,7 +35,7 @@ Pour chaque fichier TIFF placé dans `input`, le programme suit cet ordre :
 8. rotation rigide, sans étirement ni écrasement ;
 9. recadrage de l’élément après rotation ;
 10. ajout d’une bordure physique de 2 mm ;
-11. remplacement du fond par RVB 0, 0, 12, sans convertir le sujet ;
+11. remplacement du fond par RVB 5, 0, 2, sans convertir le sujet ;
 12. contrôle qualité, nommage incrémenté et sauvegarde dans `output`.
 
 Le fond gris n’est supprimé que s’il ressemble au fond mesuré et s’il est
