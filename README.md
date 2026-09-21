@@ -78,6 +78,13 @@ GPU n’est nécessaire.
 
 ## Utilisation normale
 
+Le plus simple : copier les TIFF dans le dossier `input`, puis double-cliquer
+sur `LANCER_TRAITEMENT.bat`. La fenêtre reste ouverte à la fin (ou en cas
+d'erreur) tant qu'une touche n'a pas été pressée, pour pouvoir lire le
+résultat. Les fichiers générés apparaissent dans `output`.
+
+En ligne de commande :
+
 1. Copier les TIFF dans le dossier `input`.
 2. Ouvrir un terminal dans le dossier du projet (Maj + clic droit → « Ouvrir
    dans le terminal »).
