@@ -262,6 +262,7 @@ def run_quality_control(
     )
 
     margins = _subject_margins(rotated.alpha)
+    exact_margin_expected = required_margin_px_xy is not None
     if required_margin_px_xy is None:
         required_margin_px_xy = (
             config.qa_min_border_margin_px,
@@ -280,7 +281,7 @@ def run_quality_control(
             name="marge_2mm_et_sujet_non_coupe",
             passed=not_cut,
             message=(
-                f"Marge CMJN de {config.output_margin_mm:g} mm présente sur les quatre côtés."
+                f"Marge d'au moins {config.output_margin_mm:g} mm présente sur les quatre côtés."
                 if not_cut
                 else (
                     "Marge insuffisante ou sujet coupé : "
@@ -300,6 +301,46 @@ def run_quality_control(
             },
         )
     )
+
+    if exact_margin_expected:
+        # La bordure est ajoutée une seule fois, après un cadrage au ras du
+        # sujet : chaque côté doit donc mesurer exactement la marge calculée.
+        # Une marge plus large signale une bordure ajoutée deux fois ou un
+        # cadrage qui laisse de l'espace vide autour du sujet.
+        exact = (
+            left == required_x
+            and right == required_x
+            and top == required_y
+            and bottom == required_y
+        )
+        report.checks.append(
+            QCCheck(
+                name="marge_exacte",
+                passed=exact,
+                message=(
+                    f"Marge exacte de {config.output_margin_mm:g} mm "
+                    f"({required_x} px × {required_y} px) sur les quatre côtés."
+                    if exact
+                    else (
+                        "Marge différente de la valeur attendue : "
+                        f"gauche={left}px, haut={top}px, droite={right}px, "
+                        f"bas={bottom}px (attendu {required_x}px à gauche/droite, "
+                        f"{required_y}px en haut/bas)."
+                    )
+                ),
+                measured={
+                    "gauche_px": left,
+                    "haut_px": top,
+                    "droite_px": right,
+                    "bas_px": bottom,
+                },
+                expected={
+                    "gauche_droite_px": required_x,
+                    "haut_bas_px": required_y,
+                    "marge_mm": config.output_margin_mm,
+                },
+            )
+        )
 
     alpha_mass_after = float(rotated.alpha.astype(np.float64).sum() / 255.0)
     alpha_area_delta = _relative_difference(

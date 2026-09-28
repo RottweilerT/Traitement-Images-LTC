@@ -202,3 +202,64 @@ class SegmentationStructureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class MarginTests(unittest.TestCase):
+    def _run_on_synthetic_scan(self, dpi: float, angle: float) -> list[dict]:
+        import json
+
+        from PIL import Image
+
+        from image_pipeline.pipeline import process_batch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            scan = np.full((400, 500, 3), (128, 128, 128), dtype=np.uint8)
+            rectangle = ((250.0, 200.0), (220.0, 150.0), angle)
+            box = cv2.boxPoints(rectangle).astype(np.int32)
+            cv2.fillConvexPoly(scan, box, (200, 40, 60))
+            Image.fromarray(scan).save(input_dir / "timbre.tif", dpi=(dpi, dpi))
+
+            config = replace(
+                DEFAULT_CONFIG,
+                input_dir=input_dir,
+                output_dir=output_dir,
+            )
+            process_batch(config)
+            reports = [
+                json.loads(line)
+                for path in output_dir.rglob("controle_qualite.jsonl")
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            outputs = list(output_dir.rglob("timbre*.tif"))
+            self.assertEqual(len(outputs), 1)
+            return reports
+
+    def _margin_check(self, reports: list[dict]) -> dict:
+        checks = [
+            check
+            for report in reports
+            for check in report.get("checks", [])
+            if check.get("name") == "marge_exacte"
+        ]
+        self.assertEqual(len(checks), 1)
+        return checks[0]
+
+    def test_margin_is_exactly_2mm_once_at_300_dpi(self) -> None:
+        check = self._margin_check(self._run_on_synthetic_scan(300.0, 4.0))
+        self.assertTrue(check["passed"], check)
+        self.assertEqual(check["expected"]["gauche_droite_px"], 24)
+        self.assertEqual(
+            set(check["measured"].values()),
+            {24},
+        )
+
+    def test_margin_follows_resolution_at_600_dpi(self) -> None:
+        check = self._margin_check(self._run_on_synthetic_scan(600.0, 0.0))
+        self.assertTrue(check["passed"], check)
+        self.assertEqual(set(check["measured"].values()), {48})
