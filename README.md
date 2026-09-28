@@ -93,16 +93,17 @@ Les originaux placés dans `input` ne sont jamais écrasés.
 
 ## Installation
 
-Dans l'explorateur de fichiers, ouvrir le dossier extrait du zip, puis
-Maj + clic droit dans le dossier → « Ouvrir dans le terminal » (ou « Ouvrir
-la fenêtre PowerShell ici »). Ensuite, exécuter :
+Une seule fois : double-cliquer sur **`INSTALLER.bat`**.
 
-```bat
-python -m pip install -r requirements.txt
-```
+Il crée dans le dossier du projet un environnement Python 3.12 (`.venv`) et y
+installe NumPy, Pillow, OpenCV et SciPy. Python 3.12 doit être installé
+(https://www.python.org/downloads/). Python 3.14 n'est volontairement pas
+utilisé : le contrôle intelligent des applications de Windows y bloque une
+bibliothèque de SciPy.
 
-Les dépendances utilisées sont NumPy, Pillow, OpenCV et SciPy. Aucun composant
-GPU n’est nécessaire.
+`LANCER_TRAITEMENT.bat` et `BILAN_MANUEL.bat` utilisent automatiquement cet
+environnement `.venv`. S'il n'existe pas, ils essaient Python 3.12, puis
+`python`. Aucun composant GPU n'est nécessaire.
 
 ## Utilisation normale
 
