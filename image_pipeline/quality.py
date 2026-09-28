@@ -278,7 +278,7 @@ def run_quality_control(
     )
     report.checks.append(
         QCCheck(
-            name="marge_2mm_et_sujet_non_coupe",
+            name="marge_min_et_sujet_non_coupe",
             passed=not_cut,
             message=(
                 f"Marge d'au moins {config.output_margin_mm:g} mm présente sur les quatre côtés."

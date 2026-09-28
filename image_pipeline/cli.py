@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--margin-mm",
         type=float,
         default=DEFAULT_CONFIG.output_margin_mm,
-        help="marge CMJN autour de chaque sujet, en millimètres (défaut : 2)",
+        help="marge foncée autour de chaque sujet, en millimètres (défaut : 1)",
     )
     parser.add_argument(
         "--straighten",

@@ -1,4 +1,10 @@
-# Traitement d’images — version 1.8.0
+# Traitement d’images — version 1.9.0
+
+## Nouveauté 1.9.0
+
+La bordure foncée autour de chaque sujet passe de **2 mm à 1 mm**
+(12 px à 300 dpi, 24 px à 600 dpi). Elle reste modifiable dans
+`image_pipeline/config.py` (`output_margin_mm`) ou avec `--margin-mm`.
 
 ## Nouveautés 1.8.0
 
@@ -80,7 +86,7 @@ Pour chaque fichier TIFF placé dans `input`, le programme suit cet ordre :
 7. calcul de l’orientation à partir du plus long bord ;
 8. rotation rigide (Lanczos + anti-halo), sans étirement ni écrasement ;
 9. recadrage de l’élément après rotation ;
-10. ajout d’une bordure physique de 2 mm ;
+10. ajout d’une bordure physique de 1 mm ;
 11. remplacement du fond par RVB 5, 0, 2, sans convertir le sujet ;
 12. contrôle qualité, nommage incrémenté et sauvegarde dans `output`.
 
@@ -149,7 +155,7 @@ Vérification de la version :
 python run_pipeline.py --version
 ```
 
-La réponse attendue est `1.8.0`.
+La réponse attendue est `1.9.0`.
 
 ## Nommage, lots et séparation
 
@@ -174,13 +180,13 @@ document_A-3.tif
 
 Le programme n'écrase jamais silencieusement une sortie existante.
 
-## Bordure foncée de 2 mm
+## Bordure foncée de 1 mm
 
 La bordure est ajoutée après la rotation et le recadrage. Sa taille en pixels
 est calculée avec la résolution du TIFF :
 
 ```text
-pixels = plafond(2 × résolution_dpi / 25,4)
+pixels = plafond(1 × résolution_dpi / 25,4)
 ```
 
 Si le fichier ne contient pas de résolution exploitable, 300 dpi sont utilisés.
@@ -198,7 +204,7 @@ Ils se trouvent à la fin de `image_pipeline/config.py` :
 - `split_subjects=True` : sépare les éléments disjoints ;
 - `straighten=True` : active le redressement ;
 - `subpixel_edges=True` : contour anticrénelé, sans escalier après rotation ;
-- `output_margin_mm=2.0` : largeur de la bordure ;
+- `output_margin_mm=1.0` : largeur de la bordure ;
 - `preserve_subject_rgb=True` : interdit la conversion globale en CMJN ;
 - `rgb_background=(5, 0, 2)` : couleur du fond et de la marge ;
 - `output_format="TIFF"` : format sans perte recommandé.
@@ -206,7 +212,7 @@ Ils se trouvent à la fin de `image_pipeline/config.py` :
 Exemple avec des dossiers personnalisés :
 
 ```bat
-python run_pipeline.py "C:\MesTIFF" -o "C:\MesResultats" --margin-mm 2
+python run_pipeline.py "C:\MesTIFF" -o "C:\MesResultats" --margin-mm 1
 ```
 
 

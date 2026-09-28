@@ -94,7 +94,7 @@ class PipelineConfig:
 
     # Marge physique ajoutée autour de chaque sujet extrait. La résolution du
     # TIFF source est conservée ; 300 dpi sont utilisés si elle est absente.
-    output_margin_mm: float = 2.0
+    output_margin_mm: float = 1.0
     fallback_dpi: float = 300.0
 
     # Fond demandé : C=84 %, M=82 %, J=73 %, N=95 %.

@@ -255,7 +255,7 @@ def save_to_temporary_file(
 
     save_options: dict[str, object] = {}
     # La résolution est toujours inscrite dans la sortie : elle donne à la
-    # marge calculée en pixels sa dimension physique garantie de 2 mm.
+    # marge calculée en pixels sa dimension physique garantie (1 mm par défaut).
     save_options["dpi"] = config.effective_dpi(frame.dpi)
     if composite.output_icc_profile is not None:
         save_options["icc_profile"] = composite.output_icc_profile

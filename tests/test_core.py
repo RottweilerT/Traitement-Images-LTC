@@ -255,19 +255,19 @@ class MarginTests(unittest.TestCase):
         self.assertEqual(len(checks), 1)
         return checks[0]
 
-    def test_margin_is_exactly_2mm_once_at_300_dpi(self) -> None:
+    def test_margin_is_exactly_1mm_once_at_300_dpi(self) -> None:
         check = self._margin_check(self._run_on_synthetic_scan(300.0, 4.0))
         self.assertTrue(check["passed"], check)
-        self.assertEqual(check["expected"]["gauche_droite_px"], 24)
+        self.assertEqual(check["expected"]["gauche_droite_px"], 12)
         self.assertEqual(
             set(check["measured"].values()),
-            {24},
+            {12},
         )
 
     def test_margin_follows_resolution_at_600_dpi(self) -> None:
         check = self._margin_check(self._run_on_synthetic_scan(600.0, 0.0))
         self.assertTrue(check["passed"], check)
-        self.assertEqual(set(check["measured"].values()), {48})
+        self.assertEqual(set(check["measured"].values()), {24})
 
 
 @unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
