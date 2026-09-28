@@ -1,4 +1,4 @@
-# Traitement d’images — version 1.7.0, rotation sans lignes de décalage
+# Traitement d’images — version 1.7.1, rotation sans lignes de décalage
 
 ## Rotation sans lignes de décalage 1.7.0
 
@@ -131,7 +131,7 @@ Vérification de la version :
 python run_pipeline.py --version
 ```
 
-La réponse attendue est `1.7.0`.
+La réponse attendue est `1.7.1`.
 
 ## Nommage, lots et séparation
 

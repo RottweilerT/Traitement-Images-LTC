@@ -375,3 +375,45 @@ class SmoothRotationTests(unittest.TestCase):
             subject, OrientationEstimate(determinable=True), DEFAULT_CONFIG, padding_xy=(0, 0)
         )
         self.assertTrue(np.array_equal(result.rgb, rgb))
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class DustTests(unittest.TestCase):
+    def test_dust_specks_do_not_enlarge_the_subject(self) -> None:
+        """Des poussières sur le fond ne doivent ni agrandir le cadrage ni
+        empêcher la mesure de l'inclinaison (régression 1.7.0)."""
+
+        from image_pipeline.geometry import detect_subject_inclination
+        from image_pipeline.models import FrameData
+        from image_pipeline.segmentation import (
+            detect_subject_regions,
+            detect_subjects_on_uniform_gray_background,
+        )
+
+        # Bords anticrénelés comme sur un vrai scan : rendu ×4 puis réduction.
+        big = np.full((2400, 2000, 3), (42, 45, 43), dtype=np.uint8)
+        box = cv2.boxPoints(((1000.0, 1200.0), (800.0, 1600.0), 1.8)).astype(np.int32)
+        cv2.fillConvexPoly(big, box, (235, 140, 60))
+        scan = cv2.resize(big, (500, 600), interpolation=cv2.INTER_AREA)
+        for x, y in ((12, 15), (480, 20), (30, 570), (470, 585), (250, 30)):
+            cv2.circle(scan, (x, y), 1, (220, 220, 220), -1)  # poussières
+
+        frame = FrameData(
+            source_path=Path("scan.tif"),
+            frame_index=0,
+            rgb=scan,
+            source_alpha=np.full(scan.shape[:2], 255, dtype=np.uint8),
+            dpi=(300.0, 300.0),
+        )
+        segmentation = detect_subjects_on_uniform_gray_background(frame, DEFAULT_CONFIG)
+        self.assertIsNotNone(segmentation)
+        regions = detect_subject_regions(segmentation.alpha, DEFAULT_CONFIG)
+        self.assertEqual(len(regions), 1)
+        ys, xs = np.nonzero(regions[0].alpha > 0)
+        width = xs.max() - xs.min() + 1
+        height = ys.max() - ys.min() + 1
+        self.assertLess(width, 230, "une poussière a été rattachée au sujet")
+        self.assertLess(height, 420, "une poussière a été rattachée au sujet")
+        orientation = detect_subject_inclination(regions[0].alpha, DEFAULT_CONFIG)
+        self.assertTrue(orientation.determinable)
+        self.assertAlmostEqual(abs(orientation.correction_deg), 1.8, delta=0.3)

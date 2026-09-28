@@ -61,6 +61,9 @@ class PipelineConfig:
     component_grouping_gap_px: int = 2
     min_subject_area_ratio: float = 0.001
     retain_all_uncertain_pixels: bool = True
+    # Distance maximale (px) entre un pixel semi-transparent et le sujet
+    # auquel il est rattaché.
+    uncertain_pixel_max_distance_px: int = 16
     crop_padding_px: int = 48
 
     # Redressement géométrique

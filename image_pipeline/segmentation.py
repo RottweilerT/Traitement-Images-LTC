@@ -181,6 +181,8 @@ def detect_subjects_on_uniform_gray_background(
 _EDGE_MIN_CONTRAST = 24.0
 # Couverture en dessous de laquelle un pixel extérieur reste transparent.
 _EDGE_MIN_ALPHA = 8
+# Distance maximale (px) jusqu'au pixel plein servant de couleur de référence.
+_EDGE_MAX_REFERENCE_DISTANCE = 4.0
 
 
 def _subpixel_edge_alpha(
@@ -216,17 +218,21 @@ def _subpixel_edge_alpha(
     solid = cv2.erode(subject_u8, kernel, iterations=2) > 0
     if not np.any(solid):
         solid = subject
-    _, indices = ndimage.distance_transform_edt(~solid, return_indices=True)
+    distances, indices = ndimage.distance_transform_edt(~solid, return_indices=True)
     band_y, band_x = np.nonzero(band)
     ref_y = indices[0][band_y, band_x]
     ref_x = indices[1][band_y, band_x]
+    # Détail fin ou isolé (poussière, pointe) : aucun pixel plein à proximité,
+    # la couleur de référence serait celle d'un autre objet. On garde alors
+    # la décision binaire d'origine.
+    near_solid = distances[band_y, band_x] <= _EDGE_MAX_REFERENCE_DISTANCE
 
     pixel = rgb[band_y, band_x].astype(np.float64)
     foreground = rgb[ref_y, ref_x].astype(np.float64)
     background = np.asarray(background_rgb, dtype=np.float64)[None, :]
     direction = foreground - background
     contrast_sq = np.sum(direction * direction, axis=1)
-    reliable = contrast_sq >= _EDGE_MIN_CONTRAST**2
+    reliable = (contrast_sq >= _EDGE_MIN_CONTRAST**2) & near_solid
     coverage = np.sum((pixel - background) * direction, axis=1) / np.maximum(
         contrast_sq, 1e-9
     )
@@ -370,11 +376,25 @@ def detect_subject_regions(
 
     has_soft_alpha = bool(np.any((alpha > 0) & (alpha < 255)))
     if config.retain_all_uncertain_pixels and has_soft_alpha:
-        _, nearest_indices = ndimage.distance_transform_edt(
+        distances, nearest_indices = ndimage.distance_transform_edt(
             anchors == 0,
             return_indices=True,
         )
         assigned_labels = anchors[tuple(nearest_indices)]
+        # Seuls les pixels réellement incertains (faible alpha) et proches
+        # d'un sujet lui sont rattachés. Une poussière opaque trop petite pour
+        # être un sujet reste écartée : sinon elle agrandit le cadrage jusqu'aux
+        # bords du scan et fausse la mesure de l'inclinaison.
+        uncertain_nearby = (
+            (anchors == 0)
+            & (alpha < config.component_seed_alpha)
+            & (distances <= config.uncertain_pixel_max_distance_px)
+        )
+        assigned_labels = np.where(
+            (anchors > 0) | uncertain_nearby,
+            assigned_labels,
+            0,
+        )
     else:
         assigned_labels = anchors
 
