@@ -171,7 +171,11 @@ def process_one_frame(
 
     logger.info("  Trame %d : détection déterministe du fond…", frame.frame_index)
     segmentation = generate_precise_cutout(frame, logger, config)
-    regions = detect_subject_regions(segmentation.alpha, config)
+    regions = detect_subject_regions(
+        segmentation.alpha,
+        config,
+        separation_mask=segmentation.separation_mask,
+    )
     numbered = numbered or len(regions) > 1
     logger.info("  Trame %d : %d sujet(s) à produire", frame.frame_index, len(regions))
 

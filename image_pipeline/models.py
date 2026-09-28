@@ -29,6 +29,10 @@ class SegmentationResult:
     edge_rgb: UInt8Array
     alpha: UInt8Array
     old_background_rgb: tuple[int, int, int]
+    # Masque servant uniquement à *séparer* les sujets : les étroits couloirs
+    # sombres entre deux éléments très proches y sont retirés. Le détourage
+    # final (alpha) n'est pas modifié.
+    separation_mask: UInt8Array | None = None
 
 
 @dataclass(slots=True)

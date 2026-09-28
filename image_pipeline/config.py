@@ -43,6 +43,13 @@ class PipelineConfig:
     # partir du mélange sujet/fond gris : évite l'escalier du bord après
     # redressement. L'intérieur du sujet n'est pas concerné.
     subpixel_edges: bool = True
+    # Bande étroite d'une autre couleur le long d'un bord du scan (carton de
+    # fond plus petit que la vitre, marge blanche du scanner) : exclue avant
+    # la mesure du fond. Au-delà de 5 % de la dimension, elle n'est pas
+    # considérée comme parasite et le scan est refusé comme avant.
+    ignore_scanner_edge_strips: bool = True
+    scanner_edge_max_fraction: float = 0.05
+    scanner_edge_safety_px: int = 3
     gray_background_neutral_tolerance: int = 32
     gray_background_max_spread: float = 25.0
     gray_background_min_distance: float = 6.0
@@ -60,6 +67,16 @@ class PipelineConfig:
     component_seed_alpha: int = 32
     component_grouping_gap_px: int = 2
     min_subject_area_ratio: float = 0.001
+    # Séparation d'éléments posés presque bord à bord : le couloir de fond
+    # (même plus sombre que le fond, ombre du papier) relié au fond extérieur
+    # est retiré, puis une érosion coupe les points de contact. N'agit que sur
+    # le découpage en sujets, jamais sur le détourage final.
+    separate_close_subjects: bool = True
+    separation_background_distance: float = 60.0
+    separation_erosion_px: int = 3
+    # Largeur maximale (px) d'un couloir de séparation : une zone sombre plus
+    # large appartient au dessin d'un timbre et ne coupe jamais un élément.
+    separation_max_channel_px: int = 8
     retain_all_uncertain_pixels: bool = True
     # Distance maximale (px) entre un pixel semi-transparent et le sujet
     # auquel il est rattaché.

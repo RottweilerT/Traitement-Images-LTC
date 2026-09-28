@@ -1,4 +1,22 @@
-# Traitement d’images — version 1.7.1, rotation sans lignes de décalage
+# Traitement d’images — version 1.8.0
+
+## Nouveautés 1.8.0
+
+- **Éléments posés presque bord à bord** : deux planches séparées par un
+  couloir de fond de quelques pixels (souvent plus sombre que le fond, à cause
+  de l'ombre des bords du papier) sont désormais séparées en deux fichiers.
+  Seul un couloir *étroit* (8 px au plus) peut séparer : une zone d'encre
+  sombre plus large touchant le bord d'un timbre ne le coupe jamais.
+- **Bande parasite le long d'un bord du scan** (carton noir plus court que la
+  vitre, marge blanche du scanner) : elle est ignorée au lieu de faire échouer
+  le scan (« fond extérieur non exploitable »), si elle ne dépasse pas 5 % de
+  la dimension.
+- **Numérotation** : des éléments côte à côte sont numérotés de gauche à
+  droite, même si l'un est posé quelques pixels plus haut.
+- **Poussières du fond** (1.7.1) : elles ne sont plus rattachées au sujet et
+  ne faussent plus le cadrage ni la mesure de l'inclinaison.
+
+## Rotation sans lignes de décalage (1.7.0)
 
 ## Rotation sans lignes de décalage 1.7.0
 
@@ -131,7 +149,7 @@ Vérification de la version :
 python run_pipeline.py --version
 ```
 
-La réponse attendue est `1.7.1`.
+La réponse attendue est `1.8.0`.
 
 ## Nommage, lots et séparation
 
@@ -240,7 +258,10 @@ des éléments, ou fournir une image déjà détourée avec transparence.
 
 ## Limites
 
-- Deux éléments qui se touchent peuvent être considérés comme un seul élément.
+- Deux éléments qui se chevauchent, ou qui se touchent sur une longueur
+  importante, sont considérés comme un seul élément.
+- Un élément dont un bord déborde de travers (pellure, languette) peut fausser
+  la mesure de l'inclinaison ; le contrôle qualité le signale alors.
 - Un fond très texturé, coloré, ombré ou interrompu n’est pas traité.
 - Une dentelure ayant exactement la même couleur que le fond et directement
   reliée à celui-ci peut rester ambiguë.

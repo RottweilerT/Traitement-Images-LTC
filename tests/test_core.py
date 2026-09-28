@@ -417,3 +417,115 @@ class DustTests(unittest.TestCase):
         orientation = detect_subject_inclination(regions[0].alpha, DEFAULT_CONFIG)
         self.assertTrue(orientation.determinable)
         self.assertAlmostEqual(abs(orientation.correction_deg), 1.8, delta=0.3)
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class CloseSubjectsTests(unittest.TestCase):
+    def _scan(self, gap_px: int):
+        from image_pipeline.models import FrameData
+
+        k = 4
+        big = np.full((600 * k, 700 * k, 3), (42, 45, 43), dtype=np.uint8)
+        # Deux blocs posés presque bord à bord, séparés par un couloir sombre
+        # (ombre des bords du papier) et se touchant sur une petite longueur.
+        left = ((60 * k, 60 * k), ((340 - gap_px) * k, 540 * k))
+        right = ((340 * k, 50 * k), (640 * k, 530 * k))
+        cv2.rectangle(big, left[0], left[1], (235, 230, 215), -1)
+        cv2.rectangle(big, right[0], right[1], (235, 230, 215), -1)
+        cv2.rectangle(big, ((340 - gap_px) * k, 60 * k), (340 * k, 530 * k), (18, 18, 18), -1)
+        cv2.rectangle(big, ((340 - gap_px) * k, 300 * k), (340 * k, 302 * k), (235, 230, 215), -1)
+        for x in (150, 500):
+            cv2.rectangle(big, ((x - 40) * k, 200 * k), ((x + 40) * k, 400 * k), (40, 40, 60), -1)
+        scan = cv2.resize(big, (700, 600), interpolation=cv2.INTER_AREA)
+        return FrameData(
+            source_path=Path("scan.tif"),
+            frame_index=0,
+            rgb=scan,
+            source_alpha=np.full(scan.shape[:2], 255, dtype=np.uint8),
+            dpi=(300.0, 300.0),
+        )
+
+    def _regions(self, frame, config=DEFAULT_CONFIG):
+        from image_pipeline.segmentation import (
+            detect_subject_regions,
+            detect_subjects_on_uniform_gray_background,
+        )
+
+        segmentation = detect_subjects_on_uniform_gray_background(frame, config)
+        self.assertIsNotNone(segmentation)
+        return detect_subject_regions(
+            segmentation.alpha, config, separation_mask=segmentation.separation_mask
+        )
+
+    def test_blocks_separated_by_thin_dark_channel_are_split(self) -> None:
+        regions = self._regions(self._scan(gap_px=3))
+        self.assertEqual(len(regions), 2)
+        # Ordre de lecture : le bloc de gauche d'abord, même posé plus bas.
+        self.assertLess(regions[0].bbox_xyxy[0], regions[1].bbox_xyxy[0])
+        # Chaque bloc est complet (aucune partie perdue par la séparation).
+        for region in regions:
+            ys, xs = np.nonzero(region.alpha > 0)
+            self.assertGreater(ys.max() - ys.min(), 470)
+
+    def test_separation_can_be_disabled(self) -> None:
+        config = replace(DEFAULT_CONFIG, separate_close_subjects=False)
+        self.assertEqual(len(self._regions(self._scan(gap_px=3), config)), 1)
+
+    def test_dark_ink_inside_a_stamp_does_not_split_it(self) -> None:
+        # Un seul élément avec une large zone d'encre sombre à l'intérieur.
+        regions = self._regions(self._scan(gap_px=0))
+        self.assertEqual(len(regions), 1)
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class ThickDarkAreaTests(unittest.TestCase):
+    def test_thick_dark_band_touching_the_edge_never_splits_an_item(self) -> None:
+        """Une large bande d'encre sombre traversant un timbre de bord à bord
+        ressemble au fond, mais elle est épaisse : ce n'est pas un couloir."""
+
+        from image_pipeline.models import FrameData
+        from image_pipeline.segmentation import (
+            detect_subject_regions,
+            detect_subjects_on_uniform_gray_background,
+        )
+
+        k = 4
+        big = np.full((600 * k, 600 * k, 3), (42, 45, 43), dtype=np.uint8)
+        cv2.rectangle(big, (100 * k, 80 * k), (500 * k, 520 * k), (235, 230, 215), -1)
+        # Bande sombre presque neutre, de 40 px, d'un bord à l'autre.
+        cv2.rectangle(big, (280 * k, 80 * k), (320 * k, 520 * k), (30, 32, 40), -1)
+        scan = cv2.resize(big, (600, 600), interpolation=cv2.INTER_AREA)
+        frame = FrameData(
+            source_path=Path("scan.tif"),
+            frame_index=0,
+            rgb=scan,
+            source_alpha=np.full(scan.shape[:2], 255, dtype=np.uint8),
+            dpi=(300.0, 300.0),
+        )
+        segmentation = detect_subjects_on_uniform_gray_background(frame, DEFAULT_CONFIG)
+        regions = detect_subject_regions(
+            segmentation.alpha, DEFAULT_CONFIG, separation_mask=segmentation.separation_mask
+        )
+        self.assertEqual(len(regions), 1)
+
+
+class ScannerEdgeStripTests(unittest.TestCase):
+    def test_white_strip_along_bottom_edge_is_ignored(self) -> None:
+        from image_pipeline.models import FrameData
+        from image_pipeline.segmentation import detect_subjects_on_uniform_gray_background
+
+        scan = np.full((500, 400, 3), (42, 45, 43), dtype=np.uint8)
+        scan[-12:] = (235, 235, 235)  # carton de fond plus court que la vitre
+        scan[100:300, 100:300] = (200, 120, 60)
+        frame = FrameData(
+            source_path=Path("scan.tif"),
+            frame_index=0,
+            rgb=scan,
+            source_alpha=np.full(scan.shape[:2], 255, dtype=np.uint8),
+            dpi=(300.0, 300.0),
+        )
+        segmentation = detect_subjects_on_uniform_gray_background(frame, DEFAULT_CONFIG)
+        self.assertIsNotNone(segmentation, "la bande blanche fait échouer le scan")
+        self.assertTrue(np.all(segmentation.alpha[-12:] == 0))
+        ys, xs = np.nonzero(segmentation.alpha)
+        self.assertEqual((ys.min(), ys.max(), xs.min(), xs.max()), (100, 299, 100, 299))

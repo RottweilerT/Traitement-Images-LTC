@@ -117,13 +117,105 @@ def detect_subjects_on_uniform_gray_background(
     if not config.prefer_uniform_gray_background:
         return None
 
-    border = _outer_border_selector(frame.rgb.shape[:2])
-    border_rgb = frame.rgb[border].astype(np.float32)
+    rgb = frame.rgb
+    top, bottom, left, right = _scanner_edge_strips(rgb, config)
+    if top or bottom or left or right:
+        # Bandes étroites le long des bords du scan (bord du carton noir,
+        # marge blanche du scanner) : exclues avant la mesure du fond, puis
+        # rendues transparentes dans le résultat.
+        height, width = rgb.shape[:2]
+        inner = rgb[top : height - bottom, left : width - right]
+        result = _detect_on_gray_area(inner, config)
+        if result is None:
+            return None
+        window = (slice(top, height - bottom), slice(left, width - right))
+        alpha = np.zeros((height, width), dtype=np.uint8)
+        alpha[window] = result.alpha
+        edge_rgb = rgb.copy()
+        edge_rgb[window] = result.edge_rgb
+        separation_mask = None
+        if result.separation_mask is not None:
+            separation_mask = np.zeros((height, width), dtype=np.uint8)
+            separation_mask[window] = result.separation_mask
+        return SegmentationResult(
+            original_rgb=rgb,
+            edge_rgb=edge_rgb,
+            alpha=alpha,
+            old_background_rgb=result.old_background_rgb,
+            separation_mask=separation_mask,
+        )
+    return _detect_on_gray_area(rgb, config)
+
+
+def _scanner_edge_strips(
+    rgb: np.ndarray,
+    config: PipelineConfig,
+) -> tuple[int, int, int, int]:
+    """Largeur (px) des bandes parasites le long des 4 bords du scan.
+
+    Le fond de référence est la médiane des 4 côtés. Un côté dont la couleur
+    s'en écarte nettement est parcouru vers l'intérieur, ligne par ligne,
+    tant que la ligne entière (sa médiane) reste différente du fond. Si la
+    bande dépasse ``scanner_edge_max_fraction`` de la dimension, ce n'est pas
+    une bande parasite : rien n'est exclu et la détection échoue normalement.
+    """
+
+    if not config.ignore_scanner_edge_strips:
+        return 0, 0, 0, 0
+    height, width = rgb.shape[:2]
+    band = max(4, int(round(min(height, width) * 0.01)))
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    side_medians = [
+        np.median(lab[:band].reshape(-1, 3), axis=0),
+        np.median(lab[-band:].reshape(-1, 3), axis=0),
+        np.median(lab[:, :band].reshape(-1, 3), axis=0),
+        np.median(lab[:, -band:].reshape(-1, 3), axis=0),
+    ]
+    reference = np.median(np.stack(side_medians), axis=0)
+    limit = config.gray_background_max_spread
+
+    def walk(lines: np.ndarray, maximum: int) -> int:
+        # lines : médiane Lab de chaque ligne, du bord vers l'intérieur.
+        count = 0
+        for value in lines[: maximum + 1]:
+            if float(np.linalg.norm(value - reference)) > limit:
+                count += 1
+            else:
+                break
+        if count == 0 or count > maximum:
+            return 0
+        return count + config.scanner_edge_safety_px
+
+    max_rows = int(height * config.scanner_edge_max_fraction)
+    max_cols = int(width * config.scanner_edge_max_fraction)
+    depth_rows = min(height, max_rows + 1)
+    depth_cols = min(width, max_cols + 1)
+    top_lines = np.median(lab[:depth_rows], axis=1)
+    bottom_lines = np.median(lab[::-1][:depth_rows], axis=1)
+    left_lines = np.median(lab[:, :depth_cols], axis=0)
+    right_lines = np.median(lab[:, ::-1][:, :depth_cols], axis=0)
+    strips = [
+        walk(top_lines, max_rows) if np.linalg.norm(side_medians[0] - reference) > limit else 0,
+        walk(bottom_lines, max_rows) if np.linalg.norm(side_medians[1] - reference) > limit else 0,
+        walk(left_lines, max_cols) if np.linalg.norm(side_medians[2] - reference) > limit else 0,
+        walk(right_lines, max_cols) if np.linalg.norm(side_medians[3] - reference) > limit else 0,
+    ]
+    return strips[0], strips[1], strips[2], strips[3]
+
+
+def _detect_on_gray_area(
+    rgb: np.ndarray,
+    config: PipelineConfig,
+) -> SegmentationResult | None:
+    """Détection du fond gris sur une zone de scan (voir fonction publique)."""
+
+    border = _outer_border_selector(rgb.shape[:2])
+    border_rgb = rgb[border].astype(np.float32)
     median_rgb = np.median(border_rgb, axis=0)
     if float(np.ptp(median_rgb)) > config.gray_background_neutral_tolerance:
         return None
 
-    lab = cv2.cvtColor(frame.rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
     border_lab = lab[border]
     median_lab = np.median(border_lab, axis=0)
     border_distances = np.linalg.norm(border_lab - median_lab, axis=1)
@@ -163,17 +255,74 @@ def detect_subjects_on_uniform_gray_background(
         return None
 
     background_rgb = tuple(int(round(value)) for value in median_rgb)
+    separation_mask = _separation_mask(
+        subject,
+        exterior_gray,
+        distance_to_gray,
+        threshold,
+        config,
+    )
     if config.subpixel_edges:
-        alpha, edge_rgb = _subpixel_edge_alpha(frame.rgb, subject, median_rgb)
+        alpha, edge_rgb = _subpixel_edge_alpha(rgb, subject, median_rgb)
     else:
         alpha = np.where(subject, 255, 0).astype(np.uint8)
-        edge_rgb = frame.rgb.copy()
+        edge_rgb = rgb.copy()
     return SegmentationResult(
-        original_rgb=frame.rgb,
+        original_rgb=rgb,
         edge_rgb=edge_rgb,
         alpha=alpha,
         old_background_rgb=background_rgb,  # type: ignore[arg-type]
+        separation_mask=separation_mask,
     )
+
+
+def _separation_mask(
+    subject: np.ndarray,
+    exterior_gray: np.ndarray,
+    distance_to_gray: np.ndarray,
+    threshold: float,
+    config: PipelineConfig,
+) -> np.ndarray | None:
+    """Masque des pixels sûrs du sujet, utilisé seulement pour séparer.
+
+    Entre deux éléments posés presque bord à bord, le fond visible n'est qu'un
+    couloir de quelques pixels, souvent plus sombre que le fond (ombre des
+    bords du papier) : il n'est donc pas reconnu comme fond et relie les deux
+    éléments. Ici, les pixels proches de la couleur du fond (tolérance élargie)
+    *et reliés au fond extérieur* sont retirés, puis une légère érosion coupe
+    les points de contact de 1 à 2 pixels. Les zones sombres enfermées à
+    l'intérieur d'un timbre ne sont pas concernées, car non reliées au fond.
+    """
+
+    if not config.separate_close_subjects:
+        return None
+    wide = max(float(config.separation_background_distance), threshold)
+    near_background = (distance_to_gray <= wide).astype(np.uint8)
+    count, labels = cv2.connectedComponents(near_background, connectivity=8)
+    if count <= 1:
+        return None
+    touching = np.unique(labels[exterior_gray & (labels > 0)])
+    channel = np.isin(labels, touching[touching > 0]) & subject
+    # Seul un couloir *étroit* sépare deux éléments. Une zone sombre épaisse
+    # (encre foncée, photo sombre, cadre coloré) touchant le bord d'un timbre
+    # n'est pas un couloir : l'ouverture morphologique la retrouve et elle est
+    # conservée dans le sujet.
+    half_width = max(1, int(config.separation_max_channel_px) // 2)
+    disk = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (2 * half_width + 1, 2 * half_width + 1),
+    )
+    thick = cv2.morphologyEx(channel.astype(np.uint8), cv2.MORPH_OPEN, disk) > 0
+    channel = channel & ~cv2.dilate(thick.astype(np.uint8), disk).astype(bool)
+    safe = subject & ~channel
+    radius = max(0, int(config.separation_erosion_px))
+    if radius:
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (2 * radius + 1, 2 * radius + 1),
+        )
+        safe = cv2.erode(safe.astype(np.uint8), kernel) > 0
+    return safe.astype(np.uint8)
 
 
 # Distance minimale (RVB) entre le sujet et le fond pour estimer une
@@ -312,9 +461,40 @@ def _expanded_bbox(
     return x0, y0, x1, y1
 
 
+def _reading_order(
+    payloads: list[tuple[tuple[int, int, int, int], np.ndarray]],
+) -> list[tuple[tuple[int, int, int, int], np.ndarray]]:
+    """Ordre de lecture : rangées de haut en bas, puis de gauche à droite.
+
+    Deux éléments côte à côte dont les hauteurs se chevauchent largement sont
+    dans la même rangée, même si l'un est posé quelques pixels plus haut.
+    """
+
+    remaining = sorted(payloads, key=lambda item: item[0][1])
+    ordered: list[tuple[tuple[int, int, int, int], np.ndarray]] = []
+    while remaining:
+        first = remaining.pop(0)
+        row = [first]
+        row_top, row_bottom = first[0][1], first[0][3]
+        rest = []
+        for item in remaining:
+            _, top, _, bottom = item[0]
+            overlap = min(bottom, row_bottom) - max(top, row_top)
+            shortest = min(bottom - top, row_bottom - row_top)
+            if shortest > 0 and overlap >= 0.5 * shortest:
+                row.append(item)
+            else:
+                rest.append(item)
+        row.sort(key=lambda item: item[0][0])
+        ordered.extend(row)
+        remaining = rest
+    return ordered
+
+
 def detect_subject_regions(
     alpha: np.ndarray,
     config: PipelineConfig,
+    separation_mask: np.ndarray | None = None,
 ) -> list[SubjectRegion]:
     """Détecte un canevas global ou plusieurs sujets indépendants.
 
@@ -339,6 +519,12 @@ def detect_subject_regions(
         ]
 
     seed = (alpha >= config.component_seed_alpha).astype(np.uint8)
+    if separation_mask is not None:
+        # Graines issues du masque de séparation : les couloirs étroits entre
+        # deux éléments proches n'y relient plus les éléments.
+        separated = (seed > 0) & (separation_mask > 0)
+        if np.any(separated):
+            seed = separated.astype(np.uint8)
     if not np.any(seed):
         seed = present.astype(np.uint8)
     gap = max(0, config.component_grouping_gap_px)
@@ -375,23 +561,35 @@ def detect_subject_regions(
         anchors[labels == old_label] = new_label
 
     has_soft_alpha = bool(np.any((alpha > 0) & (alpha < 255)))
-    if config.retain_all_uncertain_pixels and has_soft_alpha:
+    needs_assignment = separation_mask is not None or (
+        config.retain_all_uncertain_pixels and has_soft_alpha
+    )
+    if needs_assignment:
         distances, nearest_indices = ndimage.distance_transform_edt(
             anchors == 0,
             return_indices=True,
         )
         assigned_labels = anchors[tuple(nearest_indices)]
-        # Seuls les pixels réellement incertains (faible alpha) et proches
-        # d'un sujet lui sont rattachés. Une poussière opaque trop petite pour
-        # être un sujet reste écartée : sinon elle agrandit le cadrage jusqu'aux
-        # bords du scan et fausse la mesure de l'inclinaison.
+        # 1) Pixels opaques d'un élément dont une partie est une ancre (bords,
+        #    dentelures retirés par l'érosion de séparation) : rattachés à
+        #    l'ancre la plus proche.
+        blob_count, blobs = cv2.connectedComponents(
+            (alpha >= config.component_seed_alpha).astype(np.uint8),
+            connectivity=8,
+        )
+        anchored_blobs = np.unique(blobs[(anchors > 0) & (blobs > 0)])
+        in_anchored_blob = np.isin(blobs, anchored_blobs) & (blobs > 0)
+        # 2) Pixels réellement incertains (faible alpha) proches d'un sujet.
+        # Une poussière isolée (élément sans ancre) reste écartée : sinon elle
+        # agrandit le cadrage jusqu'aux bords du scan et fausse l'inclinaison.
         uncertain_nearby = (
-            (anchors == 0)
+            config.retain_all_uncertain_pixels
+            & (anchors == 0)
             & (alpha < config.component_seed_alpha)
             & (distances <= config.uncertain_pixel_max_distance_px)
         )
         assigned_labels = np.where(
-            (anchors > 0) | uncertain_nearby,
+            (anchors > 0) | in_anchored_blob | uncertain_nearby,
             assigned_labels,
             0,
         )
@@ -408,8 +606,7 @@ def detect_subject_regions(
         region_alpha = np.where(selector, alpha, 0)[y0:y1, x0:x1].copy()
         region_payloads.append((bbox, region_alpha))
 
-    # Ordre explicite : du haut vers le bas, puis de gauche à droite.
-    region_payloads.sort(key=lambda item: (item[0][1], item[0][0]))
+    region_payloads = _reading_order(region_payloads)
     return [
         SubjectRegion(index, bbox, region_alpha)
         for index, (bbox, region_alpha) in enumerate(region_payloads, start=1)
