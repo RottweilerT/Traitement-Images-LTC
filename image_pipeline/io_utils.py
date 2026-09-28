@@ -34,7 +34,10 @@ def setup_logging(config: PipelineConfig) -> logging.Logger:
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    logger.handlers.clear()
+    # Ferme les journaux d'un lancement précédent (fichier libéré sous Windows).
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
 
     formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(message)s",

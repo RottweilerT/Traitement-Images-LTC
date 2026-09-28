@@ -246,7 +246,7 @@ def process_source_file(
     try:
         first_frame = next(frames)
     except StopIteration:
-        raise RuntimeError("Le fichier ne contient aucune trame exploitable.")
+        raise RuntimeError("Le fichier ne contient aucune trame exploitable.") from None
 
     try:
         second_frame = next(frames)

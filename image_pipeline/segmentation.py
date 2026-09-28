@@ -108,8 +108,11 @@ def detect_subjects_on_uniform_gray_background(
 
     Seuls les pixels ressemblant au gris mesuré sur le cadre *et reliés au
     cadre* deviennent transparents. Une couleur identique située à l'intérieur
-    d'un timbre reste donc intacte. Le masque n'est ni érodé, ni fermé, ni
-    lissé : dentelures et bordures sont conservées à la résolution du scan.
+    d'un timbre reste donc intacte. Le masque n'est ni érodé ni fermé :
+    dentelures et bordures sont conservées à la résolution du scan ; seule la
+    rangée de pixels du contour reçoit une transparence partielle (voir
+    ``_subpixel_edge_alpha``). Une bande parasite étroite le long d'un bord du
+    scan est exclue au préalable (voir ``_scanner_edge_strips``).
     ``None`` indique que le fond ne peut pas être identifié avec assez de
     sécurité par cette méthode déterministe.
     """
@@ -499,8 +502,12 @@ def detect_subject_regions(
     """Détecte un canevas global ou plusieurs sujets indépendants.
 
     En mode multi-sujets, les composantes sont regroupées après dilatation.
-    Avec un alpha source semi-transparent, les pixels incertains peuvent être
-    affectés à l'ancre la plus proche afin de conserver les petits détails.
+    Avec ``separation_mask``, les ancres sont prises dans ce masque, où les
+    couloirs étroits entre éléments proches sont retirés. Les pixels opaques
+    d'un élément ancré et les pixels semi-transparents proches sont ensuite
+    rattachés à l'ancre la plus proche ; une poussière isolée est écartée.
+    L'ordre de sortie suit la lecture : rangées de haut en bas, puis de gauche
+    à droite.
     """
 
     present = alpha > 0

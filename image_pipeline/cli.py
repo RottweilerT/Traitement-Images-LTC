@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--icc-profile",
         type=Path,
         default=DEFAULT_CONFIG.output_cmyk_icc_profile,
-        help="profil ICC CMJN de l'imprimeur",
+        help="profil ICC CMJN de l'imprimeur (sans effet en mode par défaut, qui conserve le RVB)",
     )
     parser.add_argument(
         "--split-subjects",

@@ -1,4 +1,4 @@
-# Traitement d’images — version 1.9.0
+# Traitement d’images — version 1.9.1
 
 ## Nouveauté 1.9.0
 
@@ -23,8 +23,6 @@ La bordure foncée autour de chaque sujet passe de **2 mm à 1 mm**
   ne faussent plus le cadrage ni la mesure de l'inclinaison.
 
 ## Rotation sans lignes de décalage (1.7.0)
-
-## Rotation sans lignes de décalage 1.7.0
 
 Jusqu'à la 1.6.0, la rotation déplaçait des pixels entiers (plus proche
 voisin). Sur un sujet incliné de quelques degrés, cela dupliquait ou sautait
@@ -79,9 +77,10 @@ Pour chaque fichier TIFF placé dans `input`, le programme suit cet ordre :
 
 1. lecture de chaque trame du fichier source ;
 2. utilisation prioritaire d’un canal alpha déjà présent et valide ;
-3. sinon, mesure du fond gris sur le cadre extérieur de l’image ;
+3. sinon, mesure du fond gris sur le cadre extérieur de l’image (une bande
+   parasite étroite le long d'un bord est d'abord écartée) ;
 4. retrait des seuls pixels gris reliés au cadre extérieur ;
-5. séparation des éléments réellement disjoints ;
+5. séparation des éléments disjoints, y compris posés presque bord à bord ;
 6. protection des pixels intérieurs de chaque élément ;
 7. calcul de l’orientation à partir du plus long bord ;
 8. rotation rigide (Lanczos + anti-halo), sans étirement ni écrasement ;
@@ -109,8 +108,12 @@ Traitement-Images-LTC/
 ├── input/                  fichiers originaux à traiter
 ├── output/                 fichiers générés
 ├── image_pipeline/         modules du programme
+├── tests/                  tests automatiques
+├── INSTALLER.bat           installation (une seule fois)
+├── LANCER_TRAITEMENT.bat   traitement du dossier input
+├── BILAN_MANUEL.bat        bilan du contrôle manuel
 ├── requirements.txt        dépendances
-└── run_pipeline.py         lancement
+└── run_pipeline.py         lancement en ligne de commande
 ```
 
 Les originaux placés dans `input` ne sont jamais écrasés.
@@ -155,7 +158,7 @@ Vérification de la version :
 python run_pipeline.py --version
 ```
 
-La réponse attendue est `1.9.0`.
+La réponse attendue est `1.9.1`.
 
 ## Nommage, lots et séparation
 

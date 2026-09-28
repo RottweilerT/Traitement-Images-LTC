@@ -107,8 +107,9 @@ def replace_background(
     """Compose le sujet sur le fond demandé, en dernier dans le pipeline.
 
     En mode de préservation (par défaut), le sujet reste en RVB sRGB et le fond
-    devient #00000c. Le mode CMJN intégral reste disponible uniquement si cette
-    protection est désactivée explicitement avec un profil de destination.
+    devient ``config.rgb_background`` (RVB 5, 0, 2 = #050002). Le mode CMJN
+    intégral reste disponible uniquement si ``preserve_subject_rgb`` est
+    désactivé explicitement, de préférence avec un profil de destination.
     """
 
     output_format = config.output_format.upper()

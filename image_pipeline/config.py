@@ -61,8 +61,9 @@ class PipelineConfig:
     gray_border_artifact_max_depth_ratio: float = 0.05
     gray_border_artifact_max_area_ratio: float = 0.02
 
-    # Détection / extraction. Par défaut, tous les éléments du masque restent
-    # sur un même canevas afin de ne pas séparer accidentellement un détail.
+    # Détection / extraction. Par défaut, chaque élément disjoint produit son
+    # propre fichier ; les petits détails proches sont regroupés avec leur
+    # élément (component_grouping_gap_px) pour ne pas être séparés.
     split_subjects: bool = True
     component_seed_alpha: int = 32
     component_grouping_gap_px: int = 2
@@ -97,7 +98,8 @@ class PipelineConfig:
     output_margin_mm: float = 1.0
     fallback_dpi: float = 300.0
 
-    # Fond demandé : C=84 %, M=82 %, J=73 %, N=95 %.
+    # Fond CMJN (C=84 %, M=82 %, J=73 %, N=95 %) : utilisé uniquement si
+    # preserve_subject_rgb est désactivé (mode CMJN intégral).
     cmyk_background_percent: tuple[float, float, float, float] = (
         84.0,
         82.0,
@@ -107,10 +109,11 @@ class PipelineConfig:
     # Les scans fournis sont des TIFF RVB sans profil ICC. Une conversion de
     # tout le document en CMJN modifierait donc leur apparence selon le logiciel
     # d'affichage. Par défaut, le sujet reste en RVB sRGB et seul le fond reçoit
-    # l'équivalent visuel demandé. #00000c est la couleur de fond de référence.
+    # l'équivalent visuel demandé : RVB 5, 0, 2 (#050002).
     preserve_subject_rgb: bool = True
     rgb_background: tuple[int, int, int] = (5, 0, 2)
     output_format: str = "TIFF"  # TIFF recommandé | JPEG | PNG (aperçu RVB)
+    # Profil ICC CMJN : utilisé uniquement en mode CMJN intégral.
     output_cmyk_icc_profile: Path | None = None
     tiff_compression: str = "tiff_lzw"
     jpeg_quality: int = 100
@@ -177,6 +180,20 @@ class PipelineConfig:
             raise ValueError("La résolution de repli doit être positive.")
         if self.max_megapixels <= 0:
             raise ValueError("max_megapixels doit être strictement positif.")
+        if not 0 < self.scanner_edge_max_fraction < 0.5 or self.scanner_edge_safety_px < 0:
+            raise ValueError("Les paramètres des bandes de bord du scan sont invalides.")
+        if (
+            self.separation_background_distance < 0
+            or self.separation_erosion_px < 0
+            or self.separation_max_channel_px < 1
+        ):
+            raise ValueError("Les paramètres de séparation des éléments sont invalides.")
+        if self.component_grouping_gap_px < 0 or self.uncertain_pixel_max_distance_px < 0:
+            raise ValueError("Les distances de regroupement ne peuvent pas être négatives.")
+        if not 0 < self.component_seed_alpha <= 255:
+            raise ValueError("component_seed_alpha doit être compris entre 1 et 255.")
+        if self.min_rotation_deg < 0 or self.max_rotation_deg < self.min_rotation_deg:
+            raise ValueError("Les limites d'angle de redressement sont invalides.")
 
     @property
     def output_extension(self) -> str:
