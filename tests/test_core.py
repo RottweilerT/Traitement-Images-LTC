@@ -41,9 +41,14 @@ class ColorAndNamingTests(unittest.TestCase):
         )
         result = replace_background(rotated, DEFAULT_CONFIG)
         output = np.asarray(result.image)
-        expected = np.asarray((214, 209, 186, 242), dtype=np.uint8)
-        self.assertEqual(result.image.mode, "CMYK")
+        # Depuis la 1.5.0, le sujet reste en RVB et le fond utilise le noir
+        # de référence RVB 5, 0, 2 (#050002).
+        expected = np.asarray(DEFAULT_CONFIG.rgb_background, dtype=np.uint8)
+        self.assertEqual(tuple(expected), (5, 0, 2))
+        self.assertEqual(result.image.mode, "RGB")
         self.assertTrue(np.all(output[alpha == 0] == expected))
+        # Les pixels du sujet ne doivent pas être modifiés.
+        self.assertTrue(np.all(output[alpha == 255] == rgb[alpha == 255]))
 
     def test_single_output_keeps_source_name(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
