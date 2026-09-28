@@ -379,7 +379,18 @@ def run_quality_control(
         )
     )
 
+    # Le filtre Lanczos lit 4 pixels autour de chaque point : près du bord du
+    # cœur, il mélange légitimement la bande de contour détourée. Le contrôle
+    # porte donc sur le cœur situé à plus de 4 pixels de ce bord.
+    # Sans rotation, aucun rééchantillonnage : tout le cœur est contrôlé.
     core = rotated.protected_core > 0
+    rotation_applied = not np.allclose(
+        rotated.affine_matrix[:, :2],
+        np.eye(2),
+        atol=1e-12,
+    )
+    if rotation_applied:
+        core = cv2.erode(core.astype(np.uint8), np.ones((9, 9), dtype=np.uint8)) > 0
     core_count = int(np.count_nonzero(core))
     if core_count:
         changed_core = int(
@@ -399,7 +410,11 @@ def run_quality_control(
             name="interieur_inchange",
             passed=interior_ok,
             message=(
-                f"Les {core_count} pixels protégés gardent leurs valeurs RVB."
+                (
+                    f"Les {core_count} pixels intérieurs n'ont subi que la rotation."
+                    if rotation_applied
+                    else f"Les {core_count} pixels protégés gardent leurs valeurs RVB."
+                )
                 if interior_ok
                 else (
                     "Impossible de garantir l'intérieur : "

@@ -3,4 +3,4 @@
 from .config import DEFAULT_CONFIG, PipelineConfig
 
 __all__ = ["DEFAULT_CONFIG", "PipelineConfig"]
-__version__ = "1.6.0"
+__version__ = "1.7.0"

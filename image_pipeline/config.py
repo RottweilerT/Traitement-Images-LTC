@@ -39,6 +39,10 @@ class PipelineConfig:
     # Méthode prioritaire pour les scans sur fond gris uniforme. Elle retire
     # uniquement le fond connecté au cadre et ne demande aucune prédiction IA.
     prefer_uniform_gray_background: bool = True
+    # Couverture partielle (anticrénelage) des pixels du contour, calculée à
+    # partir du mélange sujet/fond gris : évite l'escalier du bord après
+    # redressement. L'intérieur du sujet n'est pas concerné.
+    subpixel_edges: bool = True
     gray_background_neutral_tolerance: int = 32
     gray_background_max_spread: float = 25.0
     gray_background_min_distance: float = 6.0

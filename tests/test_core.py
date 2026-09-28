@@ -268,3 +268,110 @@ class MarginTests(unittest.TestCase):
         check = self._margin_check(self._run_on_synthetic_scan(600.0, 0.0))
         self.assertTrue(check["passed"], check)
         self.assertEqual(set(check["measured"].values()), {48})
+
+
+@unittest.skipIf(cv2 is None, "OpenCV n'est pas installé")
+class SmoothRotationTests(unittest.TestCase):
+    """La rotation ne doit créer ni ligne de décalage, ni halo, ni escalier."""
+
+    ANGLE = 2.3
+
+    def _tilted_scan(self) -> tuple[np.ndarray, np.ndarray]:
+        """Scan simulé : timbre incliné sur fond gris, intégré ×4 comme un capteur."""
+
+        k = 4
+        height, width = 160 * k, 240 * k
+        stamp = np.full((height, width, 3), (235, 225, 200), dtype=np.uint8)
+        for y in range(10 * k, height - 10 * k, 9 * k):
+            stamp[y : y + k] = (70, 50, 130)  # traits fins horizontaux (1 px)
+        canvas_h, canvas_w = 320 * k, 400 * k
+        matrix = cv2.getRotationMatrix2D((width / 2, height / 2), -self.ANGLE, 1.0)
+        matrix[:, 2] += (canvas_w / 2 - width / 2, canvas_h / 2 - height / 2)
+        rotated = cv2.warpAffine(stamp, matrix, (canvas_w, canvas_h), flags=cv2.INTER_LINEAR)
+        coverage = cv2.warpAffine(
+            np.ones((height, width), np.float32), matrix, (canvas_w, canvas_h),
+            flags=cv2.INTER_LINEAR,
+        )
+        scan = rotated * coverage[..., None] + 128.0 * (1.0 - coverage[..., None])
+        scan = cv2.resize(scan, (400, 320), interpolation=cv2.INTER_AREA)
+        return np.clip(np.rint(scan), 0, 255).astype(np.uint8), stamp
+
+    def _process(self) -> tuple[np.ndarray, np.ndarray]:
+        from image_pipeline.geometry import (
+            detect_subject_inclination,
+            straighten_subject_without_clipping,
+        )
+        from image_pipeline.models import FrameData
+        from image_pipeline.segmentation import (
+            detect_subject_regions,
+            detect_subjects_on_uniform_gray_background,
+            protect_subject_interior,
+        )
+
+        scan, _ = self._tilted_scan()
+        frame = FrameData(
+            source_path=Path("timbre.tif"),
+            frame_index=0,
+            rgb=scan,
+            source_alpha=np.full(scan.shape[:2], 255, dtype=np.uint8),
+            dpi=(300.0, 300.0),
+        )
+        segmentation = detect_subjects_on_uniform_gray_background(frame, DEFAULT_CONFIG)
+        self.assertIsNotNone(segmentation)
+        region = detect_subject_regions(segmentation.alpha, DEFAULT_CONFIG)[0]
+        subject = protect_subject_interior(segmentation, region, DEFAULT_CONFIG)
+        orientation = detect_subject_inclination(subject.alpha, DEFAULT_CONFIG)
+        result = straighten_subject_without_clipping(
+            subject, orientation, DEFAULT_CONFIG, padding_xy=(10, 10)
+        )
+        return result.rgb, result.alpha
+
+    def test_thin_lines_have_no_offset_steps(self) -> None:
+        rgb, alpha = self._process()
+        opaque_cols = np.nonzero(np.all(alpha[alpha.shape[0] // 2 - 20 :][:40] == 255, axis=0))[0]
+        cols = opaque_cols[10:-10]
+        darkness = 255.0 - rgb[..., 1].astype(np.float64)
+        # Suivi d'un trait fin : position verticale (centre de gravité) colonne
+        # par colonne. Au plus proche voisin, elle saute d'un pixel entier.
+        centre_row = alpha.shape[0] // 2
+        window = slice(centre_row - 4, centre_row + 5)
+        best = np.argmax(darkness[window, cols].mean(axis=1))
+        rows = np.arange(centre_row - 4, centre_row + 5)[max(0, best - 2) : best + 3]
+        weights = darkness[rows][:, cols] - darkness[rows][:, cols].min(axis=0)
+        centroid = (weights * rows[:, None]).sum(axis=0) / np.maximum(weights.sum(axis=0), 1e-9)
+        jumps = np.abs(np.diff(centroid))
+        self.assertLess(float(jumps.max()), 0.35, "ligne de décalage détectée")
+
+    def test_no_halo_brighter_than_paper(self) -> None:
+        scan, _ = self._tilted_scan()
+        rgb, alpha = self._process()
+        # Intérieur du sujet (à plus de 2 px du contour, dont la couleur est
+        # décontaminée du fond gris et peut varier d'un niveau d'arrondi).
+        opaque = cv2.erode((alpha == 255).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        paper_max = scan.reshape(-1, 3).max(axis=0)
+        self.assertTrue(np.all(rgb[opaque] <= paper_max), "halo plus clair que l'original")
+
+    def test_edges_are_smooth_not_staircase(self) -> None:
+        _, alpha = self._process()
+        cols = np.nonzero(alpha.max(axis=0) == 255)[0][15:-15]
+        # Hauteur du bord supérieur, au sous-pixel, colonne par colonne.
+        top = alpha[:40, cols].astype(np.float64).sum(axis=0) / 255.0
+        self.assertLess(float(np.ptp(top)), 0.8, "bord en escalier")
+
+    def test_zero_angle_copies_pixels_unchanged(self) -> None:
+        from image_pipeline.geometry import straighten_subject_without_clipping
+
+        rng = np.random.default_rng(0)
+        rgb = rng.integers(0, 256, (40, 60, 3), dtype=np.uint8)
+        alpha = np.full((40, 60), 255, dtype=np.uint8)
+        subject = ProtectedSubject(
+            original_rgb=rgb.copy(),
+            protected_rgb=rgb.copy(),
+            alpha=alpha,
+            protected_core=np.ones((40, 60), dtype=np.uint8),
+            old_background_rgb=(128, 128, 128),
+        )
+        result = straighten_subject_without_clipping(
+            subject, OrientationEstimate(determinable=True), DEFAULT_CONFIG, padding_xy=(0, 0)
+        )
+        self.assertTrue(np.array_equal(result.rgb, rgb))

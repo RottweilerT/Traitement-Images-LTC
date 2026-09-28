@@ -1,4 +1,32 @@
-# Traitement d’images — version 1.6.0, contrôle manuel et couleurs protégées
+# Traitement d’images — version 1.7.0, rotation sans lignes de décalage
+
+## Rotation sans lignes de décalage 1.7.0
+
+Jusqu'à la 1.6.0, la rotation déplaçait des pixels entiers (plus proche
+voisin). Sur un sujet incliné de quelques degrés, cela dupliquait ou sautait
+une ligne de pixels à intervalles réguliers : les traits fins et le texte
+présentaient des **lignes de décalage** (effet d'escalier), et le bord du
+sujet devenait **pointillé**.
+
+La rotation utilise désormais :
+
+- un filtre **Lanczos** pour les couleurs (famille du « Bicubique » de
+  Photoshop, légèrement plus net) : plus aucun pixel dupliqué ou sauté ;
+- un **anti-halo** : chaque pixel tourné reste compris entre le minimum et le
+  maximum des 4 pixels d'origine qui l'entourent, ce qui supprime les liserés
+  clairs ou sombres qu'un filtre bicubique ou Lanczos crée le long des traits
+  fins ;
+- un **contour sous-pixel** : les pixels du bord, mi-sujet mi-fond gris dans
+  le scan, reçoivent une transparence partielle proportionnelle à leur
+  mélange, et le gris en est retiré. Le bord reste ainsi droit et lisse après
+  redressement (paramètre `subpixel_edges=True`).
+
+Une rotation d'un angle quelconque recalcule forcément les pixels : ils ne sont
+plus identiques au bit près à l'original, mais aucune couleur plus claire ou
+plus foncée que celles du voisinage d'origine n'est créée. **Sans rotation**
+(sujet déjà droit, inclinaison inférieure à `min_rotation_deg`), les pixels
+sont copiés sans aucun recalcul.
+
 
 ## Correctif colorimétrique 1.5.0
 
@@ -32,7 +60,7 @@ Pour chaque fichier TIFF placé dans `input`, le programme suit cet ordre :
 5. séparation des éléments réellement disjoints ;
 6. protection des pixels intérieurs de chaque élément ;
 7. calcul de l’orientation à partir du plus long bord ;
-8. rotation rigide, sans étirement ni écrasement ;
+8. rotation rigide (Lanczos + anti-halo), sans étirement ni écrasement ;
 9. recadrage de l’élément après rotation ;
 10. ajout d’une bordure physique de 2 mm ;
 11. remplacement du fond par RVB 5, 0, 2, sans convertir le sujet ;
@@ -102,7 +130,7 @@ Vérification de la version :
 python run_pipeline.py --version
 ```
 
-La réponse attendue est `1.6.0`.
+La réponse attendue est `1.7.0`.
 
 ## Nommage, lots et séparation
 
@@ -150,6 +178,7 @@ Ils se trouvent à la fin de `image_pipeline/config.py` :
 
 - `split_subjects=True` : sépare les éléments disjoints ;
 - `straighten=True` : active le redressement ;
+- `subpixel_edges=True` : contour anticrénelé, sans escalier après rotation ;
 - `output_margin_mm=2.0` : largeur de la bordure ;
 - `preserve_subject_rgb=True` : interdit la conversion globale en CMJN ;
 - `rgb_background=(5, 0, 2)` : couleur du fond et de la marge ;

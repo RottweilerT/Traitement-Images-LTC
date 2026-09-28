@@ -155,6 +155,82 @@ def _expanded_rotation_matrix(
     return matrix, (output_width, output_height)
 
 
+def _warp(
+    array: np.ndarray,
+    matrix: np.ndarray,
+    output_size: tuple[int, int],
+    interpolation: int,
+) -> np.ndarray:
+    """Applique la matrice affine avec un fond extérieur à zéro."""
+
+    return cv2.warpAffine(
+        array,
+        matrix,
+        output_size,
+        flags=interpolation,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+
+
+# En dessous de cette couverture Lanczos, la couleur n'est pas assez stable
+# pour être « dé-prémultipliée » : on utilise alors la couleur bilinéaire.
+_LANCZOS_MIN_COVERAGE = 0.02
+
+
+def _neighbourhood_range(
+    rgb: np.ndarray,
+    matrix: np.ndarray,
+    output_size: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Minimum et maximum des 4 pixels source entourant chaque point tourné.
+
+    Le min/max de chaque bloc 2×2 est calculé sur la source, puis lu au plus
+    proche voisin avec un décalage d'un demi-pixel, ce qui sélectionne
+    exactement le bloc qui entoure la position source de chaque pixel.
+    """
+
+    block = np.ones((2, 2), dtype=np.uint8)
+    shifted = matrix.copy()
+    shifted[:, 2] += matrix[:, :2] @ np.array([0.5, 0.5])
+    low = _warp(cv2.erode(rgb, block, anchor=(0, 0)), shifted, output_size, cv2.INTER_NEAREST)
+    high = _warp(cv2.dilate(rgb, block, anchor=(0, 0)), shifted, output_size, cv2.INTER_NEAREST)
+    return low.astype(np.float32), high.astype(np.float32)
+
+
+def _rotate_colors_lanczos(
+    rgb: np.ndarray,
+    alpha_float_source: np.ndarray,
+    alpha_float: np.ndarray,
+    matrix: np.ndarray,
+    output_size: tuple[int, int],
+) -> np.ndarray:
+    """Tourne les couleurs avec un filtre Lanczos, en alpha prémultiplié.
+
+    Le calcul prémultiplié empêche la couleur de l'ancien fond de fuir dans le
+    contour. Dans le sujet opaque, le résultat est exactement le Lanczos des
+    couleurs. Tout au bord, là où la couverture Lanczos devient trop faible
+    (oscillations du filtre), la couleur bilinéaire prend le relais.
+    """
+
+    premultiplied = rgb.astype(np.float32) * alpha_float_source[:, :, None]
+    lanczos_premultiplied = _warp(premultiplied, matrix, output_size, cv2.INTER_LANCZOS4)
+    lanczos_alpha = _warp(alpha_float_source, matrix, output_size, cv2.INTER_LANCZOS4)
+    linear_premultiplied = _warp(premultiplied, matrix, output_size, cv2.INTER_LINEAR)
+
+    lanczos_color = lanczos_premultiplied / np.maximum(lanczos_alpha, 1e-6)[:, :, None]
+    # Anti-halo : le filtre Lanczos « déborde » légèrement sur les traits fins
+    # (liserés clairs ou sombres parallèles aux lignes). Chaque valeur est
+    # bornée par le minimum et le maximum des 4 pixels source qui l'entourent :
+    # aucune couleur plus claire ou plus foncée que l'original n'apparaît.
+    low, high = _neighbourhood_range(rgb, matrix, output_size)
+    lanczos_color = np.clip(lanczos_color, low, high)
+    linear_color = linear_premultiplied / np.maximum(alpha_float, 1e-6)[:, :, None]
+    stable = (lanczos_alpha >= _LANCZOS_MIN_COVERAGE)[:, :, None]
+    color = np.where(stable, lanczos_color, linear_color)
+    return np.clip(np.rint(color), 0, 255).astype(np.uint8)
+
+
 def _crop_rotated_subject(
     arrays: tuple[np.ndarray, ...],
     alpha_index: int,
@@ -204,9 +280,11 @@ def straighten_subject_without_clipping(
 ) -> RotationResult:
     """Applique uniquement une rotation rigide, sur un canevas agrandi.
 
-    Les couleurs sont échantillonnées au voisin le plus proche pour ne créer
-    aucune nouvelle valeur dans le cœur du sujet. Seul l'alpha du contour est
-    interpolé linéairement pour conserver une bordure visuellement lisse.
+    Les couleurs sont rééchantillonnées avec un filtre Lanczos : contrairement
+    au plus proche voisin, il ne duplique ni ne saute de lignes de pixels, ce
+    qui supprime les lignes de décalage (effet d'escalier) à l'intérieur du
+    sujet. L'alpha est interpolé linéairement pour un contour lisse. Sans
+    rotation, les pixels sont copiés sans aucun rééchantillonnage.
     """
 
     requested_angle = 0.0
@@ -227,66 +305,46 @@ def straighten_subject_without_clipping(
         requested_angle,
         (0, 0),
     )
-    flags_exact = cv2.INTER_NEAREST
-    flags_alpha = cv2.INTER_LINEAR
-    exact_rgb = cv2.warpAffine(
-        subject.protected_rgb,
-        matrix,
-        output_size,
-        flags=flags_exact,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=(0, 0, 0),
-    )
-    expected = cv2.warpAffine(
-        subject.original_rgb,
-        matrix,
-        output_size,
-        flags=flags_exact,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=(0, 0, 0),
-    )
-    alpha_float_source = subject.alpha.astype(np.float32) / 255.0
-    alpha_float = cv2.warpAffine(
-        alpha_float_source,
-        matrix,
-        output_size,
-        flags=flags_alpha,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=0.0,
-    )
-    alpha_float = np.clip(alpha_float, 0.0, 1.0)
-    alpha = np.clip(np.rint(alpha_float * 255.0), 0, 255).astype(np.uint8)
 
-    # Rotation prémultipliée sur la seule bande de contour : elle empêche une
-    # couleur extérieure de fuir dans les pixels semi-transparents créés par la
-    # rotation. Le cœur sera ensuite rétabli depuis exact_rgb.
-    premultiplied = (
-        subject.protected_rgb.astype(np.float32)
-        * alpha_float_source[:, :, None]
-    )
-    warped_premultiplied = cv2.warpAffine(
-        premultiplied,
-        matrix,
-        output_size,
-        flags=flags_alpha,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=(0.0, 0.0, 0.0),
-    )
-    safe_alpha = np.maximum(alpha_float[:, :, None], 1e-8)
-    rgb = np.clip(
-        np.rint(warped_premultiplied / safe_alpha),
-        0,
-        255,
-    ).astype(np.uint8)
-    core = cv2.warpAffine(
-        subject.protected_core,
-        matrix,
-        output_size,
-        flags=flags_exact,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=0,
-    )
-    rgb[core > 0] = exact_rgb[core > 0]
+    if requested_angle == 0.0:
+        # Aucune rotation : aucun rééchantillonnage, les pixels sont copiés
+        # tels quels (matrice identité, canevas identique).
+        rgb = subject.protected_rgb.copy()
+        expected = subject.original_rgb.copy()
+        alpha = subject.alpha.copy()
+        core = subject.protected_core.copy()
+    else:
+        alpha_float_source = subject.alpha.astype(np.float32) / 255.0
+        # Couverture (alpha) en bilinéaire : contour lisse, sans oscillation
+        # ni halo fantôme autour du sujet.
+        alpha_float = np.clip(
+            _warp(alpha_float_source, matrix, output_size, cv2.INTER_LINEAR),
+            0.0,
+            1.0,
+        )
+        alpha = np.clip(np.rint(alpha_float * 255.0), 0, 255).astype(np.uint8)
+        # Couleurs en Lanczos sur l'image entière : aucune ligne de décalage
+        # (pas de pixels dupliqués ou sautés) et netteté conservée.
+        rgb = _rotate_colors_lanczos(
+            subject.protected_rgb,
+            alpha_float_source,
+            alpha_float,
+            matrix,
+            output_size,
+        )
+        expected = _rotate_colors_lanczos(
+            subject.original_rgb,
+            alpha_float_source,
+            alpha_float,
+            matrix,
+            output_size,
+        )
+        core = _warp(
+            subject.protected_core,
+            matrix,
+            output_size,
+            cv2.INTER_NEAREST,
+        )
 
     # Ordre obligatoire : rotation, cadrage exact, puis bordure physique.
     (rgb, expected, alpha, core), matrix = _crop_rotated_subject(

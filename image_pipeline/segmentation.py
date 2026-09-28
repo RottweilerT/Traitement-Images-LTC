@@ -162,14 +162,93 @@ def detect_subjects_on_uniform_gray_background(
     ):
         return None
 
-    alpha = np.where(subject, 255, 0).astype(np.uint8)
     background_rgb = tuple(int(round(value)) for value in median_rgb)
+    if config.subpixel_edges:
+        alpha, edge_rgb = _subpixel_edge_alpha(frame.rgb, subject, median_rgb)
+    else:
+        alpha = np.where(subject, 255, 0).astype(np.uint8)
+        edge_rgb = frame.rgb.copy()
     return SegmentationResult(
         original_rgb=frame.rgb,
-        edge_rgb=frame.rgb.copy(),
+        edge_rgb=edge_rgb,
         alpha=alpha,
         old_background_rgb=background_rgb,  # type: ignore[arg-type]
     )
+
+
+# Distance minimale (RVB) entre le sujet et le fond pour estimer une
+# couverture partielle fiable ; en dessous, le contour reste binaire.
+_EDGE_MIN_CONTRAST = 24.0
+# Couverture en dessous de laquelle un pixel extérieur reste transparent.
+_EDGE_MIN_ALPHA = 8
+
+
+def _subpixel_edge_alpha(
+    rgb: np.ndarray,
+    subject: np.ndarray,
+    background_rgb: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Estime la couverture partielle des seuls pixels du contour.
+
+    Au bord d'un sujet incliné, un pixel du scan est en partie sujet et en
+    partie fond gris : ``pixel = a × sujet + (1 - a) × fond``. Un masque
+    binaire transforme ce bord en escalier, qui devient une ligne pointillée
+    une fois le sujet redressé. Ici, sur la seule bande d'un pixel de part et
+    d'autre du contour, la proportion ``a`` est calculée à partir de la couleur
+    du sujet voisin (prise deux pixels à l'intérieur) et du fond mesuré. La
+    couleur de ces pixels est « décontaminée » (le gris est retiré) dans
+    ``edge_rgb``. L'intérieur du sujet n'est jamais modifié.
+    """
+
+    subject_u8 = subject.astype(np.uint8)
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    inner_ring = subject & ~(cv2.erode(subject_u8, kernel) > 0)
+    outer_ring = (cv2.dilate(subject_u8, kernel) > 0) & ~subject
+    band = inner_ring | outer_ring
+
+    alpha = np.where(subject, 255, 0).astype(np.uint8)
+    edge_rgb = rgb.copy()
+    if not np.any(band):
+        return alpha, edge_rgb
+
+    # Couleur de référence du sujet : pixel plein le plus proche, à au moins
+    # deux pixels du contour (non mélangé au fond).
+    solid = cv2.erode(subject_u8, kernel, iterations=2) > 0
+    if not np.any(solid):
+        solid = subject
+    _, indices = ndimage.distance_transform_edt(~solid, return_indices=True)
+    band_y, band_x = np.nonzero(band)
+    ref_y = indices[0][band_y, band_x]
+    ref_x = indices[1][band_y, band_x]
+
+    pixel = rgb[band_y, band_x].astype(np.float64)
+    foreground = rgb[ref_y, ref_x].astype(np.float64)
+    background = np.asarray(background_rgb, dtype=np.float64)[None, :]
+    direction = foreground - background
+    contrast_sq = np.sum(direction * direction, axis=1)
+    reliable = contrast_sq >= _EDGE_MIN_CONTRAST**2
+    coverage = np.sum((pixel - background) * direction, axis=1) / np.maximum(
+        contrast_sq, 1e-9
+    )
+    coverage = np.clip(coverage, 0.0, 1.0)
+
+    band_alpha = np.rint(coverage * 255.0).astype(np.int32)
+    band_alpha[band_alpha < _EDGE_MIN_ALPHA] = 0
+    # Contraste insuffisant : on garde la décision binaire d'origine.
+    was_subject = subject[band_y, band_x]
+    band_alpha = np.where(reliable, band_alpha, np.where(was_subject, 255, 0))
+    alpha[band_y, band_x] = band_alpha.astype(np.uint8)
+
+    # Couleur décontaminée : on retire la part de fond gris du pixel mélangé.
+    a = np.maximum(band_alpha / 255.0, 1e-6)[:, None]
+    decontaminated = background + (pixel - background) / a
+    decontaminated = np.where(
+        (reliable & (band_alpha > 0) & (band_alpha < 255))[:, None],
+        np.clip(np.rint(decontaminated), 0, 255),
+        pixel,
+    )
+    edge_rgb[band_y, band_x] = decontaminated.astype(np.uint8)
+    return alpha, edge_rgb
 
 
 def generate_precise_cutout(
